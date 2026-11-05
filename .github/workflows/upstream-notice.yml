@@ -1,0 +1,19 @@
+name: Check upstream updates
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * 1'
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: personal
+          fetch-depth: 0
+      - run: |
+          git fetch https://github.com/mutonby/openshorts.git main
+          echo '## Upstream commits not in personal' >> "$GITHUB_STEP_SUMMARY"
+          git log --oneline HEAD..FETCH_HEAD >> "$GITHUB_STEP_SUMMARY"
