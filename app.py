@@ -4730,6 +4730,11 @@ async def get_clip_transcript(job_id: str, clip_index: int, request: Request):
         clip_start = clip_data.get('start', 0)
         clip_end = clip_data.get('end', 0)
 
+    duration_sec = clip_end - clip_start
+    if clip_data.get('caption_words'):
+        transcript = _words_transcript(clip_data['caption_words'], transcript.get('language', 'en'))
+        clip_start, clip_end = 0.0, duration_sec
+
     # Extract words within clip range and convert to CaptionWord format
     captions = []
     for segment in transcript.get('segments', []):
@@ -4741,10 +4746,9 @@ async def get_clip_transcript(job_id: str, clip_index: int, request: Request):
                     "endMs": int((max(0, word_info['end'] - clip_start)) * 1000),
                 })
 
-    duration_sec = clip_end - clip_start
-
     return {
         "captions": captions,
+        "captionStyle": clip_data.get("caption_style") or CAPTION_PRESETS["default"],
         "durationSec": duration_sec,
         "language": transcript.get('language', 'en'),
     }
@@ -5716,6 +5720,11 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
             sub_start, sub_end = 0.0, sub_transcript["segments"][0]["end"]
             caption_words = sub_transcript["segments"][0]["words"]
 
+    if req.words is None and clip_data.get('caption_words'):
+        caption_words = clip_data['caption_words']
+        sub_transcript = _words_transcript(caption_words, (transcript or {}).get('language', 'en'))
+        sub_start, sub_end = 0.0, sub_transcript['segments'][0]['end']
+
     # Video Path
     if req.input_filename:
         # Use chained file
@@ -5839,6 +5848,12 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     # Update InMemory Jobs
     if req.clip_index < len(job['result']['clips']):
          job['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+         job['result']['clips'][req.clip_index]['caption_style'] = caption_style
+         if caption_words:
+             job['result']['clips'][req.clip_index]['caption_words'] = caption_words
+         else:
+             job['result']['clips'][req.clip_index].pop('caption_words', None)
+
     
     # Update Metadata on Disk (Persistence)
     try:
@@ -6176,6 +6191,7 @@ async def translate_clip(
     # Update InMemory Jobs
     if req.clip_index < len(job['result']['clips']):
          job['result']['clips'][req.clip_index]['video_url'] = f"/videos/{req.job_id}/{output_filename}"
+
 
     # Update Metadata on Disk
     try:

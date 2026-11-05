@@ -117,8 +117,7 @@ const swatchClass = (selected) =>
         : 'ring-1 ring-[color:var(--color-rule-2)] hover:ring-[color:var(--color-accent)]'}`;
 
 export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll, onRemove, isProcessing, videoUrl, jobId, clipIndex, existingHook, bulkCount = 0, bulkProgress }) {
-    // Opens on the look the clip already has (the Default preset), so
-    // "apply" without touching anything changes nothing.
+    // The defaults cover new clips; saved style and words load when opened.
     const [position, setPosition] = useState('bottom');
     const [fontSize, setFontSize] = useState(44);
     const [fontName, setFontName] = useState('Anton');
@@ -148,6 +147,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
 
     const applyPreset = (p) => {
         setActivePreset(p.id);
+        setSavedLineBudget(null);
+        setMaxDuration(1.4);
         setStyle(p.style);
         setEffect(p.effect);
         setHighlightColor(p.highlightColor);
@@ -164,9 +165,10 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setAnimationState(p.style === 'karaoke' ? (EFFECT_TO_ANIMATION[p.effect] || 'none') : 'none');
     };
 
-    const maxChars = lineBudget(fontName, fontSize, oneWord);
+    const [savedLineBudget, setSavedLineBudget] = useState(null);
+    const maxChars = savedLineBudget ?? lineBudget(fontName, fontSize, oneWord);
     // Same block duration as the auto captions (AUTO_CAPTION_STYLE).
-    const maxDuration = 1.4;
+    const [maxDuration, setMaxDuration] = useState(1.4);
 
     // Remotion preview state
     const [captions, setCaptions] = useState([]);
@@ -174,16 +176,47 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [editableText, setEditableText] = useState('');
     const [durationSec, setDurationSec] = useState(30);
     const [captionsLoading, setCaptionsLoading] = useState(false);
+    const [captionLoadError, setCaptionLoadError] = useState('');
     const [useRemotionPreview, setUseRemotionPreview] = useState(false);
 
     // Fetch word-level captions when modal opens
     useEffect(() => {
         if (!isOpen || !jobId || clipIndex === undefined) return;
 
+        let cancelled = false;
+        const controller = new AbortController();
         setCaptionsLoading(true);
-        apiFetch(`/api/clip/${jobId}/${clipIndex}/transcript`)
-            .then((res) => res.ok ? res.json() : null)
+        setCaptionLoadError('');
+        apiFetch(`/api/clip/${jobId}/${clipIndex}/transcript`, { signal: controller.signal })
+            .then((res) => {
+                if (!res.ok) throw new Error('Could not load saved captions. Reopen the caption editor to retry.');
+                return res.json();
+            })
             .then((data) => {
+                if (cancelled) return;
+                const saved = data?.captionStyle;
+                if (saved) {
+                    setPosition(saved.position || 'bottom');
+                    setFontSize(saved.font_size ?? 44);
+                    setFontName(saved.font_name || 'Anton');
+                    setFontColor(saved.font_color || '#FFFFFF');
+                    setBorderColor(saved.border_color || '#000000');
+                    setBorderWidth(saved.border_width ?? 4);
+                    setBgColor(saved.bg_color || '#000000');
+                    setBgOpacity(saved.bg_opacity ?? 0);
+                    setStyle(saved.style || 'karaoke');
+                    setEffect(saved.effect || 'none');
+                    setHighlightColor(saved.highlight_color || '#FFE500');
+                    setBaseOpacity(saved.base_opacity ?? 1);
+                    setUppercase(saved.uppercase ?? true);
+                    setReveal(!!saved.reveal);
+                    setShadow(saved.shadow ?? 0);
+                    setOneWord(saved.max_chars === 1);
+                    setSavedLineBudget(saved.max_chars ?? 20);
+                    setMaxDuration(saved.max_duration ?? 2.0);
+                    setAnimationState(EFFECT_TO_ANIMATION[saved.effect] || 'none');
+                    setActivePreset('custom');
+                }
                 if (data && data.captions && data.captions.length > 0) {
                     setCaptions(data.captions);
                     setOriginalCaptions(data.captions);
@@ -194,8 +227,9 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                     setUseRemotionPreview(false);
                 }
             })
-            .catch(() => setUseRemotionPreview(false))
-            .finally(() => setCaptionsLoading(false));
+            .catch(() => { if (!cancelled) { setUseRemotionPreview(false); setCaptionLoadError('Could not load saved captions. Reopen the caption editor to retry.'); } })
+            .finally(() => { if (!cancelled) setCaptionsLoading(false); });
+        return () => { cancelled = true; controller.abort(); };
     }, [isOpen, jobId, clipIndex]);
 
     // When user edits text, redistribute words across original timestamps
@@ -376,7 +410,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <SegmentedControl
                                 options={SIZE_OPTIONS}
                                 value={fontSize}
-                                onChange={setFontSize}
+                                onChange={(value) => { setFontSize(value); setSavedLineBudget(null); }}
                                 size="sm"
                             />
                         </div>
@@ -386,7 +420,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 <div className="flex items-center justify-between">
                                     <span className="readout">One word at a time</span>
                                     <label className="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" checked={oneWord} onChange={(e) => setOneWord(e.target.checked)} className="sr-only peer" />
+                                        <input type="checkbox" checked={oneWord} onChange={(e) => { setOneWord(e.target.checked); setSavedLineBudget(null); }} className="sr-only peer" />
                                         <div className="w-8 h-4 rounded-full bg-paper3 peer-checked:bg-brass transition-colors after:content-[''] after:absolute after:top-0 after:left-0 after:h-4 after:w-4 after:rounded-full after:bg-ink after:transition-all peer-checked:after:translate-x-full"></div>
                                     </label>
                                 </div>
@@ -443,7 +477,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <p className="eyebrow mb-2">Font</p>
                             <select
                                 value={fontName}
-                                onChange={(e) => setFontName(e.target.value)}
+                                onChange={(e) => { setFontName(e.target.value); setSavedLineBudget(null); }}
                                 className="input-field"
                             >
                                 {FONT_OPTIONS.map((f) => (
@@ -550,6 +584,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                     </div>
 
                     <div className="mt-5 shrink-0 space-y-2">
+                        {captionLoadError && <p role="alert" className="text-danger text-sm">{captionLoadError}</p>}
                         {(() => {
                             // Text edits must survive the server render path too
                             // (issue #69): send the edited words whenever the text
@@ -574,7 +609,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                         </button>
                                         <button
                                             onClick={() => onGenerate(styleOptions)}
-                                            disabled={isProcessing}
+                                            disabled={isProcessing || captionsLoading || !!captionLoadError}
                                             className="btn-primary flex-1"
                                         >
                                             {(isProcessing && !bulkRunning) && <Loader2 size={16} className="animate-spin text-brassink" />}
@@ -584,7 +619,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                     {onApplyAll && bulkCount > 1 && (
                                         <button
                                             onClick={() => onApplyAll({ ...styleOptions, captions: null })}
-                                            disabled={isProcessing}
+                                            disabled={isProcessing || captionsLoading || !!captionLoadError}
                                             className="btn-ghost w-full flex items-center justify-center gap-2"
                                         >
                                             {bulkRunning
@@ -598,7 +633,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                     {onRemove && (
                                         <button
                                             onClick={onRemove}
-                                            disabled={isProcessing}
+                                            disabled={isProcessing || captionsLoading || !!captionLoadError}
                                             className="text-xs text-muted underline underline-offset-2 lowercase hover:text-ink2 disabled:opacity-50"
                                         >
                                             remove captions from this clip

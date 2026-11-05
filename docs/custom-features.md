@@ -12,6 +12,7 @@
 | EDIT-001 | implemented | Center height-fit uses a fixed horizontal center and preserves the full source height; narrow sources get side padding | centered_fit.py; main.py; tests/custom/test_editor_additions.py; tests/test_rerender_endpoint.py |
 | EDIT-002 | implemented | Visible browser and self-host server FIFOs with queued/running/completed/failed states, clip/job identity, elapsed time and server restart recovery | render_queue.py; dashboard/src/components/RenderQueue.jsx; tests/custom/test_editor_additions.py; tests/custom/test_render_queue_reliability.py; dashboard/src/lib/browserRenderQueue.test.js; dashboard/tests/renderQueue.test.cjs |
 | CAPTION-001 | implemented | Native clean preset uses smaller sentence-case Arial, white text, no outline and a soft shadow | subtitles.py; dashboard/src/components/SubtitleModal.jsx; tests/custom/test_editor_additions.py |
+| CAPTION-002 | implemented | Saved caption styling and edited words reload after hook updates and survive later style-only applies | app.py; dashboard/src/components/SubtitleModal.jsx; tests/test_hook_caption_persistence.py; dashboard/tests/captionPersistence.test.cjs |
 | GPU-001 | implemented | Explicit AMD/Intel VAAPI H.264 encoding with real device probe and CPU fallback; retain CPU filters, captions, hooks, framing and audio maps | ffmpeg_utils.py; vaapi_ffmpeg.py; bin/ffmpeg; Dockerfile; tests/custom/test_vaapi.py |
 
 For each implemented scheduling feature add file links, behavior tests, timezone/error cases and a manual acceptance result. Do not mark implemented on documentation alone.
@@ -39,3 +40,5 @@ Container acceptance: Debian 13 image with Mesa VAAPI, appuser plus render GID
 retention, centered framing, caption and hook graphs, and multiple outputs.
 The actual burn_subtitles/add_hook_to_video functions also succeeded on a real
 1080x1920 clip; a device-less container correctly selected x264.
+
+Caption editor initialization reads the saved style and edited words from the clip transcript endpoint. Applying a style without new words preserves saved corrections. An explicit empty words array restores the original transcript. Applying is disabled until saved settings load successfully. Hook-update/removal and modal-remount regression tests preserve CAPTION-001 and CAPTION-002.
