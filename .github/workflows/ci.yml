@@ -41,7 +41,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Render queue regression tests
-        run: node --test src/lib/browserRenderQueue.test.js tests/renderQueue.test.cjs
+      - name: Frontend regression tests
+        run: node --test src/lib/browserRenderQueue.test.js tests/*.test.cjs
       - name: Build
         run: npm run build
