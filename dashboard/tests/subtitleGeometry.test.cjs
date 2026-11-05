@@ -16,3 +16,12 @@ test('preview uses actual per-font libass metrics and integer ASS size',()=>{
   assert.ok(Math.abs(subtitleFontPixels(16,'Arial')-13*1920/288*2048/2288)<1e-10);
   assert.equal(subtitleFontPixels(34,'Impact'),subtitleFontPixels(34,'Anton'));
 });
+
+test('thick outlines remain one continuous stroked glyph, with fill on top',()=>{
+  const {subtitleOutline} = sandbox.module.exports;
+  const outline = subtitleOutline(4*1920/288,'#000000');
+  assert.equal(outline.WebkitTextStroke,`${2*4*1920/288}px #000000`);
+  assert.equal(outline.paintOrder,'stroke fill');
+  assert.equal(outline.textShadow,undefined);
+  assert.equal(subtitleOutline(0,'#000000').WebkitTextStroke,'0px #000000');
+});

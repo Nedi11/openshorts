@@ -7,6 +7,7 @@ import {
   spring,
   interpolate,
 } from "remotion";
+import { subtitleOutline } from "../../lib/subtitleGeometry";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
 import { getFontStack, antonFontFace, montserratFontFace, liberationFontFaces } from "../lib/fonts";
@@ -230,21 +231,10 @@ const WordSpan: React.FC<WordSpanProps> = ({
     }
   }
 
-  // Text stroke via textShadow (CSS paint-order not reliable in Remotion)
-  const strokeShadow =
-    style.borderWidth > 0
-      ? [
-          `${style.borderWidth}px 0 0 ${style.borderColor}`,
-          `-${style.borderWidth}px 0 0 ${style.borderColor}`,
-          `0 ${style.borderWidth}px 0 ${style.borderColor}`,
-          `0 -${style.borderWidth}px 0 ${style.borderColor}`,
-        ].join(", ")
-      : "none";
-  // Burn units -> preview px, same scale as the font size (3.85 * 0.85).
+  // A real continuous outline; offset glyph shadows split into copies at large widths.
   const dropShadow = style.shadow
-    ? `${style.shadow * (1920 / 288)}px ${style.shadow * (1920 / 288)}px ${0}px rgba(0,0,0,0.55)`
+    ? `${style.shadow * (1920 / 288)}px ${style.shadow * (1920 / 288)}px 0px rgba(0,0,0,0.55)`
     : "";
-  const outline = strokeShadow === "none" ? "" : strokeShadow;
 
   return (
     <span
@@ -253,8 +243,9 @@ const WordSpan: React.FC<WordSpanProps> = ({
         fontSize: style.fontSize,
         fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
         color: animation === "karaoke" && isActive ? undefined : color,
+        ...subtitleOutline(style.borderWidth, style.borderColor),
         textShadow:
-          [outline, dropShadow, animation !== "karaoke" ? extraStyle.textShadow : ""]
+          [dropShadow, animation !== "karaoke" ? extraStyle.textShadow : ""]
             .filter(Boolean)
             .join(", ") || "none",
         visibility: hidden ? "hidden" : "visible",
