@@ -16,3 +16,5 @@ Fork: https://github.com/Nedi11/openshorts (personal branch)
 - Postiz scheduling: SCHED-001 through SCHED-005 implemented with mocked API tests. Preserve postiz_integration.py, PostizSchedule.jsx, its ResultCard hook, child secret filtering and tests/custom/. Run these tests on every merge. Real Postiz publishing acceptance remains pending credentials.
 
 - Editor additions: preserve EDIT-001/002 and CAPTION-001, including CENTER routing before source subtitle trimming, queue decorators and UI, and matching native caption preset fields. Run tests/custom/ plus rerender/reframe/caption endpoint tests on updates.
+
+- Queue reliability: preserve best-effort history persistence, history validation and pruning, same-clip revision checks, guarded UI actions, isolated browser subscribers and the polling timeout/stale-state UI. Run Python queue tests and `node --test src/lib/browserRenderQueue.test.js tests/renderQueue.test.cjs` from dashboard/ on every merge.

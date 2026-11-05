@@ -360,3 +360,38 @@ def test_center_framing_uses_source_and_persists(job, fake_recut):
         'segments': [{'start': 13, 'end': 21}]})
     assert followup.json()['framing'] == 'center'
     assert fake_recut[1]['force_strategy'] == 'CENTER'
+
+
+def test_queued_edit_cannot_overwrite_a_newer_clip(job, fake_recut, monkeypatch):
+    import threading
+    started, release = threading.Event(), threading.Event()
+    original = recut.perform_recut
+    def slow_render(**kwargs):
+        started.set()
+        assert release.wait(3), 'test did not release the render'
+        return original(**kwargs)
+    monkeypatch.setattr(recut, 'perform_recut', slow_render)
+    async def exercise():
+        transport = httpx.ASGITransport(app=app_module.app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+            body = {'job_id': JOB_ID, 'clip_index': 0, 'segments': [{'start': 12, 'end': 22}]}
+            first = asyncio.create_task(client.post('/api/clip/rerender', json=body))
+            second = None
+            try:
+                assert await asyncio.to_thread(started.wait, 2)
+                second = asyncio.create_task(client.post('/api/clip/rerender', json=body))
+                for _ in range(100):
+                    if any(row['job_id'] == JOB_ID and row['state'] == 'queued'
+                           for row in app_module._edit_render_queue.snapshot()):
+                        break
+                    await asyncio.sleep(.001)
+                else:
+                    pytest.fail('second edit was not queued')
+            finally:
+                release.set()
+            assert (await first).status_code == 200
+            response = await second
+            assert response.status_code == 409
+            assert 'changed while' in response.json()['detail']
+    asyncio.run(exercise())
+    assert len(fake_recut) == 1

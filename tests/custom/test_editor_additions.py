@@ -61,7 +61,9 @@ def test_disconnect_does_not_release_running_render(tmp_path):
 
 def test_restart_marks_incomplete_renders(tmp_path):
     path = tmp_path / 'queue.json'
-    path.write_text(json.dumps([{'id':'1','state':'running'}, {'id':'2','state':'queued'}]))
+    path.write_text(json.dumps([
+        {'id': '1', 'state': 'running', 'operation': 'Render', 'job_id': 'j', 'clip_index': 0, 'created_at': 10},
+        {'id': '2', 'state': 'queued', 'operation': 'Render', 'job_id': 'j', 'clip_index': 1, 'created_at': 11}]))
     assert all(row['state'] == 'failed' for row in RenderQueue(path).snapshot())
 
 

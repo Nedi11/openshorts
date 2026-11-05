@@ -10,7 +10,7 @@
 | SCHED-005 | implemented | Show scheduled/published/failed and Postiz link | postiz_integration.py; tests/custom/test_postiz.py (mock API) |
 | SCHED-006 | planned | Batch clips fill slots in stable order | Not implemented |
 | EDIT-001 | implemented | Center height-fit uses a fixed horizontal center and preserves the full source height; narrow sources get side padding | centered_fit.py; main.py; tests/custom/test_editor_additions.py; tests/test_rerender_endpoint.py |
-| EDIT-002 | implemented | Visible browser and self-host server FIFOs with queued/running/completed/failed states, clip/job identity, elapsed time and server restart recovery | render_queue.py; dashboard/src/components/RenderQueue.jsx; tests/custom/test_editor_additions.py; dashboard/src/lib/browserRenderQueue.test.js |
+| EDIT-002 | implemented | Visible browser and self-host server FIFOs with queued/running/completed/failed states, clip/job identity, elapsed time and server restart recovery | render_queue.py; dashboard/src/components/RenderQueue.jsx; tests/custom/test_editor_additions.py; tests/custom/test_render_queue_reliability.py; dashboard/src/lib/browserRenderQueue.test.js; dashboard/tests/renderQueue.test.cjs |
 | CAPTION-001 | implemented | Native clean preset uses smaller sentence-case Arial, white text, no outline and a soft shadow | subtitles.py; dashboard/src/components/SubtitleModal.jsx; tests/custom/test_editor_additions.py |
 | GPU-001 | implemented | Explicit AMD/Intel VAAPI H.264 encoding with real device probe and CPU fallback; retain CPU filters, captions, hooks, framing and audio maps | ffmpeg_utils.py; vaapi_ffmpeg.py; bin/ffmpeg; Dockerfile; tests/custom/test_vaapi.py |
 
@@ -22,6 +22,7 @@ Editor behavior: the centered mode intentionally preserves source captions at th
 
 Browser exports have a separate tab-local queue and progress percentages. They need the tab to stay open. Server edits continue if the browser disconnects, and their recent history persists in output/.render-queue.json. The UI polls every two seconds and shows actual states rather than an estimated server completion percentage. Caption Native size is 16 in the existing scale, approximately one third of the default, with Arial mapped to the installed Liberation Sans font in Docker.
 
+Queue reliability checks cover corrupted history, restart timestamps, write failures, history bounds, subscriber failures, monotonic progress, queued aborts, stale server status, stalled polling, UI cleanup and conflicting edits. Queue history is best-effort diagnostic storage and reports a warning when it cannot be saved. Queued server edits verify the clip revision before execution. A conflicting request returns HTTP 409 and requires reopening the clip. Same-clip browser edits are guarded before changing their layers. Independent clips can still queue. The frontend refresh timeout is 10 seconds with a 2-second retry interval, and elapsed time has an independent clock.
 
 GPU-001: set FFMPEG_ENCODER=vaapi and optionally VAAPI_DEVICE=/dev/dri/renderD128.
 Linux Docker must expose that render device and add its host numeric group ID

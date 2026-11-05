@@ -2694,14 +2694,22 @@ app = FastAPI(lifespan=lifespan)
 
 # Personal fork: visible FIFO for edits on the single-worker self-host backend.
 from render_queue import RenderQueue
+def _edit_clip_revision(req):
+    clips = ((jobs.get(req.job_id) or {}).get('result') or {}).get('clips') or []
+    if 0 <= req.clip_index < len(clips):
+        return clips[req.clip_index].get('video_url')
+    return None
+
+
 _edit_render_queue = RenderQueue(os.path.join(OUTPUT_DIR, '.render-queue.json'),
-                                 enabled=lambda: not BILLING_ENABLED)
+                                 enabled=lambda: not BILLING_ENABLED,
+                                 revision=_edit_clip_revision)
 
 @app.get('/api/render-queue')
 async def render_queue_status():
     if BILLING_ENABLED:
         raise HTTPException(404, 'Not found')
-    return {'renders': _edit_render_queue.snapshot()}
+    return {'renders': _edit_render_queue.snapshot(), 'warning': _edit_render_queue.persistence_error}
 
 
 # Personal fork: isolated self-host scheduling adapter.
