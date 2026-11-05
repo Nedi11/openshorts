@@ -29,6 +29,7 @@ before(async () => {
       builder.onLoad({filter:/\/components\/.+\.jsx$/}, args => {
         const name = path.basename(args.path);
         if (name==='SubtitleModal.jsx') return;
+        if (name==='RemotionPreview.jsx') return {contents:'export default function Stub(props) {globalThis.captionPreview=props.subtitles; return null;}'};
         if (name==='Modal.jsx') return {contents:"import React from 'react'; export default props => props.isOpen ? React.createElement('div',null,props.children) : null;"};
         return {contents:'export default function Stub() {return null;}'};
       });
@@ -89,4 +90,22 @@ test('apply stays disabled until saved settings arrive',async()=>{
   assert.equal(applyButton().disabled,false);
   await act(async()=>applyButton().click());
   assert.equal(submitted.fontSize,16);
+});
+
+
+test('preview honors saved font geometry, zero outline and Classic static color',async()=>{
+  global.captionTestFetch=async()=>({ok:true,json:async()=>({
+    captions:[{text:'Test',startMs:0,endMs:900}],durationSec:2,
+    captionStyle:{...saved,style:'classic',effect:'pop',highlight_color:'#FF0000'},
+  })});
+  await act(async()=>render());
+  const preview=global.captionPreview;
+  assert.equal(preview.position,'top');
+  assert.equal(preview.style.animation,'none');
+  assert.equal(preview.style.highlightColor,saved.font_color);
+  assert.equal(preview.style.borderWidth,0);
+  assert.ok(preview.style.fontSize>77 && preview.style.fontSize<78);
+  await act(async()=>applyButton().click());
+  assert.equal(submitted.fontSize,16);
+  assert.equal(submitted.fontName,'Arial');
 });

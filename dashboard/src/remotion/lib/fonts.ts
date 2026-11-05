@@ -54,12 +54,12 @@ export const HOOK_FONTS: Record<string, { family: string; weight: number; factor
  * These match the options available in SubtitleModal.jsx.
  */
 export const SUBTITLE_FONTS: Record<string, string> = {
-  Verdana: "Verdana, Geneva, sans-serif",
-  Arial: "Arial, Helvetica, sans-serif",
-  Impact: "Impact, Haettenschweiler, sans-serif",
-  Helvetica: "Helvetica, Arial, sans-serif",
-  Georgia: "Georgia, 'Times New Roman', serif",
-  "Courier New": "'Courier New', Courier, monospace",
+  Verdana: "Subtitle-Sans, sans-serif",
+  Arial: "Subtitle-Sans, sans-serif",
+  Impact: `'${ANTON_FONT_FAMILY}', sans-serif`,
+  Helvetica: "Subtitle-Sans, sans-serif",
+  Georgia: "Subtitle-Serif, serif",
+  "Courier New": "Subtitle-Mono, monospace",
   Anton: `'${ANTON_FONT_FAMILY}', Impact, sans-serif`,
   "Montserrat ExtraBold": `'${MONTSERRAT_FONT_FAMILY}', 'Montserrat', sans-serif`,
 };
@@ -67,3 +67,8 @@ export const SUBTITLE_FONTS: Record<string, string> = {
 export function getFontStack(fontFamily: string): string {
   return SUBTITLE_FONTS[fontFamily] ?? fontFamily;
 }
+
+// Match the server's fontconfig aliases on every browser/OS.
+export const liberationFontFaces = ['Sans', 'Serif', 'Mono'].map(name => `
+@font-face {font-family: 'Subtitle-${name}'; src: url('${staticFile(`fonts/Liberation${name}-Bold.ttf`)}') format('truetype'); font-weight: 700; font-style: normal;}
+`).join('');
