@@ -4,6 +4,7 @@ FFMPEG_ENCODER env values:
   x264  (default) — CPU libx264, exact pre-GPU behavior
   nvenc           — force h264_nvenc; probed once and falls back to x264
                     (with a warning) if the GPU/driver is unavailable
+  vaapi           — AMD/Intel VAAPI via bin/ffmpeg; probe or fall back to x264
   auto            — h264_nvenc when the probe succeeds, else x264
 
 Only the codec/quality args live here; surrounding args (-movflags, -pix_fmt,
@@ -152,6 +153,7 @@ def audio_encode_args():
 _probe_lock = threading.Lock()
 _nvenc_ok = None  # None = not probed yet
 _announced = False
+_vaapi_ok = None
 
 
 def _probe_nvenc():
@@ -188,11 +190,31 @@ def nvenc_available():
     return _nvenc_ok
 
 
+def vaapi_available():
+    """Prove device access, driver loading and H.264 encoding before selecting VAAPI."""
+    global _vaapi_ok
+    with _probe_lock:
+        if _vaapi_ok is None:
+            device = os.environ.get("VAAPI_DEVICE", "/dev/dri/renderD128")
+            try:
+                result = subprocess.run([
+                    os.environ.get("FFMPEG_REAL_BIN", "/usr/bin/ffmpeg"),
+                    "-v", "error", "-vaapi_device", device,
+                    "-f", "lavfi", "-i", "color=s=256x256:d=0.1",
+                    "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi",
+                    "-f", "null", "-"], capture_output=True, timeout=30)
+                _vaapi_ok = result.returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                _vaapi_ok = False
+        return _vaapi_ok
+
+
 def reset_encoder_cache():
     """Test hook: forget the cached probe result."""
-    global _nvenc_ok, _announced
+    global _nvenc_ok, _announced, _vaapi_ok
     with _probe_lock:
         _nvenc_ok = None
+        _vaapi_ok = None
         _announced = False
 
 
@@ -203,6 +225,16 @@ def video_encode_args(tier=QUALITY):
         raise ValueError(f"Unknown encode tier: {tier!r}")
 
     mode = os.environ.get("FFMPEG_ENCODER", "x264").strip().lower()
+    if mode == "vaapi":
+        if vaapi_available():
+            if not _announced:
+                print("🎞️ [Encoder] video encoder: h264_vaapi (CPU filters, GPU encode)")
+                _announced = True
+            # QP is not equivalent to x264 CRF. Conservative defaults favor quality.
+            qp = "22" if tier == DELIVERY else "18"
+            return ["-c:v", "h264_vaapi", "-qp", qp]
+        if not _announced:
+            print("⚠️ [Encoder] VAAPI unavailable — falling back to libx264")
     use_nvenc = False
     if mode in ("nvenc", "auto"):
         use_nvenc = nvenc_available()
