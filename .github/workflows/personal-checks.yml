@@ -17,3 +17,7 @@ jobs:
       - run: pip install pytest fastapi httpx
       - run: python3 scripts/check-custom-features.py
       - run: python3 -m pytest tests/custom/ -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test dashboard/src/lib/browserRenderQueue.test.js

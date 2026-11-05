@@ -1,4 +1,5 @@
 import { renderMediaOnWeb } from '@remotion/web-renderer';
+import { runBrowserRender } from './browserRenderQueue';
 import { ShortVideo } from '../remotion/compositions/ShortVideo';
 
 /**
@@ -15,7 +16,17 @@ import { ShortVideo } from '../remotion/compositions/ShortVideo';
  * @param {AbortSignal} [params.signal] - Abort signal for cancellation
  * @returns {Promise<string>} Blob URL of the rendered MP4
  */
-export async function renderInBrowser({
+export function renderInBrowser(params) {
+    return runBrowserRender(params, reportProgress => renderComposition({
+        ...params,
+        onProgress: progress => {
+            reportProgress(progress);
+            params.onProgress?.(progress);
+        },
+    }));
+}
+
+async function renderComposition({
     videoUrl,
     durationInSeconds = 30,
     subtitles = null,

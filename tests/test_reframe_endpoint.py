@@ -223,3 +223,16 @@ class TestApplyCropOverrides:
         top, bottom = splits[0]
         assert top == (0.6 * 1920, 0.3 * 1080)
         assert bottom == (0.2 * 1920, 0.5 * 1080)
+
+
+def test_manual_reframe_switches_center_mode_to_tracking(job, fake_recut):
+    meta = json.loads(job['meta_path'].read_text())
+    meta['shorts'][0]['recipe'] = {
+        'v': 1, 'segments': [{'start': 10.0, 'end': 40.0}],
+        'canonical_range': {'start': 10.0, 'end': 40.0}, 'framing': 'center'}
+    job['meta_path'].write_text(json.dumps(meta))
+    response = _request('POST', '/api/clip/reframe', {
+        'job_id': JOB_ID, 'clip_index': 0, 'crop_overrides': {'0': 0.4}})
+    assert response.status_code == 200
+    assert response.json()['recipe']['framing'] == 'track'
+    assert fake_recut[0]['force_strategy'] == 'TRACK'

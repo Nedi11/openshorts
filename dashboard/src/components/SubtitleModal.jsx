@@ -53,6 +53,7 @@ const EFFECT_TO_ANIMATION = { pop: 'pop', glow: 'word-highlight', highlight: 'ka
 // with (subtitles.AUTO_CAPTION_STYLE font_size 44), so opening the modal and
 // applying never shrinks the captions.
 const SIZE_OPTIONS = [
+    { value: 16, label: 'Native' },
     { value: 34, label: 'S' },
     { value: 44, label: 'M' },
     { value: 56, label: 'L' },
@@ -79,6 +80,7 @@ const POSITION_OPTIONS = [
 // Ready-made caption looks burned server-side as karaoke ASS (word highlight):
 // dimmed base text + strong active word, optional glow/pop/box effect.
 const CAPTION_PRESETS = [
+    { id: 'native', label: 'Native clean', style: 'karaoke', effect: 'none', highlightColor: '#FFFFFF', baseOpacity: 1.0, uppercase: false, fontName: 'Arial', borderWidth: 0, shadow: 1, fontSize: 16 },
     // What every clip ships with (subtitles.AUTO_CAPTION_STYLE).
     { id: 'default', label: 'Default',  style: 'karaoke', effect: 'pop',       highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: true,  fontName: 'Anton', borderWidth: 4, fontSize: 44 },
     // Trending short-form looks (2026): word-by-word build-up, a box behind
