@@ -12,3 +12,5 @@ Fork: https://github.com/Nedi11/openshorts (personal branch)
 
 ## History
 - 2026-11-05: fork foundation based on upstream 894514049a3c6210a7cd65676344f44371b3717a. Scheduling intentionally deferred until Postiz is deployed and a real Reel publishes.
+
+- Postiz scheduling: SCHED-001 through SCHED-005 implemented with mocked API tests. Preserve postiz_integration.py, PostizSchedule.jsx, its ResultCard hook, child secret filtering and tests/custom/. Run these tests on every merge. Real Postiz publishing acceptance remains pending credentials.

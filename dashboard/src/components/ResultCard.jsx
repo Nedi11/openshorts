@@ -4,6 +4,7 @@ import { getApiUrl } from '../config';
 import { apiFetch } from '../lib/api';
 import { track } from '../lib/analytics';
 import SubtitleModal from './SubtitleModal';
+import PostizSchedule from './PostizSchedule';
 import HookModal from './HookModal';
 import TranslateModal from './TranslateModal';
 import Modal from './ui/Modal';
@@ -1014,6 +1015,8 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                         {isTranslating ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Languages size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
                         {isTranslating ? 'translating…' : 'dub voice'}
                     </button>
+
+                    {!isManaged && <PostizSchedule jobId={jobId} filename={serverVideoFile} caption={postDescription || clip.title || ''} disabled={isEditing || isSubtitling || isHooking || isTranslating} />}
 
                     <button
                         onClick={() => setShowModal(true)}
