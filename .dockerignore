@@ -68,3 +68,5 @@ README.md
 
 # Rust build output
 osrender/target/
+
+!yolov8n.pt
