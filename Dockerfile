@@ -66,6 +66,7 @@ WORKDIR /app
 # (issue #89). libass shapes and orders RTL text itself once a font has the glyphs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    mesa-va-drivers \
     curl \
     libgl1 \
     libglib2.0-0 \
