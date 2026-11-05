@@ -21,6 +21,15 @@
 # seconds (600) without a slot it runs anyway, so the cap can delay an encode,
 # never stall it. Unset, 0, no flock or no lock dir: no cap.
 REAL_FFMPEG=${FFMPEG_REAL_BIN:-/usr/bin/ffmpeg}
+# VAAPI needs hardware surfaces after the existing CPU filters. Adapt only
+# commands explicitly selected by ffmpeg_utils; stream copies stay untouched.
+if [ "${VAAPI_PREPARED:-0}" != 1 ]; then
+    for arg in "$@"; do
+        if [ "$arg" = h264_vaapi ]; then
+            exec python3 "$(dirname "$0")/../vaapi_ffmpeg.py" "$@"
+        fi
+    done
+fi
 
 slots=${NVENC_SLOTS:-0}
 case $slots in ''|*[!0-9]*) slots=0 ;; esac
