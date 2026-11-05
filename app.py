@@ -1275,7 +1275,7 @@ def _restyle_captions(video_path, transcript, start, end, style,
     auto_caption_clip uses (``subtitled_<ts>_<file>``, so the walk-backs find
     the clean file). Returns the captioned path, or None (no words, failure)."""
     output_dir = os.path.dirname(video_path)
-    generation_id = int(time.time())
+    generation_id = time.time_ns()
     karaoke = (style or {}).get("style") == "karaoke"
     # Neutral name: the path goes inside an ffmpeg filter string, where an
     # apostrophe from a clip title would close the quote.
@@ -5761,7 +5761,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
 
     # Define outputs
-    generation_id = int(time.time())
+    generation_id = time.time_ns()
     is_karaoke = req.style == "karaoke"
     srt_filename = f"subs_{req.clip_index}_{generation_id}.{'ass' if is_karaoke else 'srt'}"
     srt_path = os.path.join(output_dir, srt_filename)

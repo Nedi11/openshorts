@@ -9,7 +9,7 @@ import {
 } from "remotion";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
-import { getFontStack, antonFontFace, montserratFontFace } from "../lib/fonts";
+import { getFontStack, antonFontFace, montserratFontFace, liberationFontFaces } from "../lib/fonts";
 
 interface SubtitlesProps {
   config: SubtitleConfig;
@@ -21,9 +21,9 @@ interface SubtitlesProps {
 const RTL_CHARS = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 
 const POSITION_MAP: Record<string, React.CSSProperties> = {
-  top: { top: "12%", bottom: "auto" },
-  middle: { top: "45%", bottom: "auto" },
-  bottom: { bottom: "10%", top: "auto" },
+  top: { top: `${43 / 288 * 100}%`, bottom: "auto" },
+  middle: { top: "50%", bottom: "auto", transform: "translateY(-50%)" },
+  bottom: { bottom: `${43 / 288 * 100}%`, top: "auto" },
 };
 
 export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
@@ -36,7 +36,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
 
   return (
     <AbsoluteFill>
-      <style>{antonFontFace + montserratFontFace}</style>
+      <style>{antonFontFace + montserratFontFace + liberationFontFaces}</style>
       {blocks.map((block, i) => {
         const startFrame = Math.round((block.startMs / 1000) * fps);
         const durationFrames = Math.max(
@@ -119,8 +119,8 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
           direction: block.words.some((w) => RTL_CHARS.test(w.text)) ? "rtl" : "ltr",
           fontFamily: fontStack,
           fontSize: style.fontSize,
-          fontWeight: 700,
-          maxWidth: "85%",
+          fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
+          maxWidth: "87.65%",
           ...bgStyle,
         }}
       >
@@ -242,7 +242,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
       : "none";
   // Burn units -> preview px, same scale as the font size (3.85 * 0.85).
   const dropShadow = style.shadow
-    ? `${style.shadow * 3}px ${style.shadow * 3}px ${style.shadow * 2}px rgba(0,0,0,0.55)`
+    ? `${style.shadow * (1920 / 288)}px ${style.shadow * (1920 / 288)}px ${0}px rgba(0,0,0,0.55)`
     : "";
   const outline = strokeShadow === "none" ? "" : strokeShadow;
 
@@ -251,7 +251,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
       style={{
         fontFamily: fontStack,
         fontSize: style.fontSize,
-        fontWeight: 700,
+        fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
         color: animation === "karaoke" && isActive ? undefined : color,
         textShadow:
           [outline, dropShadow, animation !== "karaoke" ? extraStyle.textShadow : ""]

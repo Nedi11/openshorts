@@ -416,10 +416,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     else:
         border_style = 1
         outline_colour = hex_to_ass_color(border_color, 1.0, fallback="000000")
-        # 0 is a real choice now (the shadow-only "clean" look); before the
-        # slider's "None" still drew a 1px outline. Without a shadow keep the
-        # old floor, or white text on a white wall disappears.
-        outline_width = int(border_width) if shadow else max(1, int(border_width))
+        # Honor the slider's explicit zero, with or without a shadow.
+        outline_width = int(border_width)
 
     back_colour = hex_to_ass_color("#000000", 0.55 if shadow else 0.0)
     highlight_inline = _hex_to_ass_inline_color(highlight_color, fallback="FFD700")
@@ -582,9 +580,9 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
     ass_alignment = 2
     align_lower = str(alignment).lower()
     if align_lower == 'top':
-        ass_alignment = 6
+        ass_alignment = 8
     elif align_lower == 'middle':
-        ass_alignment = 10
+        ass_alignment = 5
     elif align_lower == 'bottom':
         ass_alignment = 2
 
@@ -613,7 +611,7 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         # Outline mode: text border/outline
         border_style = 1
         outline_colour = hex_to_ass_color(border_color, 1.0, fallback="000000")
-        outline_width = max(1, int(border_width))
+        outline_width = int(border_width)
 
     back_colour = hex_to_ass_color("#000000", 0.0)
 

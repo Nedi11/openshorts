@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
+import { ASS_SCALE, subtitleFontPixels } from '../lib/subtitleGeometry';
 import SegmentedControl from './ui/SegmentedControl';
 
 const FONT_OPTIONS = [
@@ -66,10 +67,6 @@ const SIZE_OPTIONS = [
 const LINE_CHARS = { Anton: 16, 'Montserrat ExtraBold': 9, Impact: 16 };
 const lineBudget = (fontName, fontSize, oneWord) =>
     oneWord ? 1 : Math.max(6, Math.round((LINE_CHARS[fontName] || 14) * 44 / fontSize));
-
-// libass sizes text against PlayResY 288 (subtitles.generate_ass): one unit
-// there is ~3.85 CSS px in the 1080x1920 preview, measured on burned frames.
-const PREVIEW_PX_PER_UNIT = 3.85;
 
 const POSITION_OPTIONS = [
     { value: 'top', label: 'top' },
@@ -264,14 +261,14 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         maxDurationMs: maxDuration * 1000,
         style: {
             fontFamily: fontName,
-            fontSize: Math.round(fontSize * 0.85 * PREVIEW_PX_PER_UNIT),
+            fontSize: subtitleFontPixels(fontSize, fontName),
             fontColor,
-            highlightColor,
+            highlightColor: style === 'karaoke' ? highlightColor : fontColor,
             borderColor,
-            borderWidth: borderWidth * 1.5,
+            borderWidth: Math.trunc(borderWidth) * ASS_SCALE,
             bgColor,
             bgOpacity,
-            animation,
+            animation: style === 'karaoke' ? animation : 'none',
             // Karaoke look reflected live in the playable preview.
             baseOpacity: style === 'karaoke' ? baseOpacity : 1,
             uppercase: style === 'karaoke' ? uppercase : false,

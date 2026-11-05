@@ -1,5 +1,6 @@
 """Tests for subtitle word merging, SRT generation and style sanitizing."""
 import subprocess
+import pytest
 from subtitles import (
     merge_continuation_words,
     generate_srt,
@@ -160,10 +161,10 @@ class TestGenerateAss:
         content = self._render(tmp_path, border_width=0, shadow=2)
         fields = next(l for l in content.splitlines() if l.startswith("Style: Default,")).split(",")
         assert (fields[16], fields[17]) == ("0", "2")   # Outline, Shadow
-        # Without a shadow, "no border" keeps the 1px floor it always had.
+        # Zero remains zero even without a shadow.
         fields = next(l for l in self._render(tmp_path, border_width=0).splitlines()
                       if l.startswith("Style: Default,")).split(",")
-        assert (fields[16], fields[17]) == ("1", "0")
+        assert (fields[16], fields[17]) == ("0", "0")
 
     def test_max_chars_one_shows_one_word_at_a_time(self, tmp_path):
         content = self._render(tmp_path, max_chars=1)
@@ -434,3 +435,10 @@ class TestBurnWithMark:
         cmd = captured["cmd"]
         assert cmd[:5] == ["ffmpeg", "-y", "-i", "in.mp4", "-vf"]
         assert cmd[5:8] == [cmd[5], "-c:a", "copy"] and cmd[-1] == "out.mp4"
+
+@pytest.mark.parametrize('position,expected', [('top', 8), ('middle', 5), ('bottom', 2)])
+def test_classic_position_and_zero_outline(position, expected):
+    from subtitles import subtitles_filter
+    vf = subtitles_filter('captions.srt', alignment=position, border_width=0)
+    assert f'Alignment={expected},' in vf
+    assert 'Outline=0,' in vf
