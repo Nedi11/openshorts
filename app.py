@@ -80,7 +80,7 @@ QUALITY_PROBE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 # Stripe key, the JWT signing secret or the database password; one exploit
 # in that stack would otherwise hand over all of them.
 CHILD_ENV_DENYLIST = frozenset({
-    "DATABASE_URL", "POSTGRES_PASSWORD", "JWT_SECRET",
+    "DATABASE_URL", "POSTGRES_PASSWORD", "JWT_SECRET", "POSTIZ_API_KEY",
     "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
     "SMTP_USER", "SMTP_PASSWORD",
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
@@ -2691,6 +2691,10 @@ async def lifespan(app: FastAPI):
     # Cleanup (optional: cancel worker)
 
 app = FastAPI(lifespan=lifespan)
+
+# Personal fork: isolated self-host scheduling adapter.
+import postiz_integration
+app.include_router(postiz_integration.create_router(OUTPUT_DIR))
 
 # Cloud mode: attach middleware + routers at import time (before the app serves).
 if BILLING_ENABLED:
