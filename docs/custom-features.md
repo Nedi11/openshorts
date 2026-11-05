@@ -50,3 +50,5 @@ Hook updates reuse hooks.add_hook_to_video(also=...) with the existing default H
 Manual acceptance: an isolated container on the desktop AMD VAAPI device produced one combined H.264 encode for both native ASS and classic SRT captions, with audio, 1080x1920 geometry, duration, saved style and edited words preserved. This used a synthetic eight-second clip, not the earlier 71-second operation.
 
 CAPTION-003: bundled Liberation bold fonts make Arial/Verdana/Helvetica, Georgia and Courier previews independent of browser OS. Preview sizing follows the integer ASS size and Windows ascent/descent of each bundled font. Classic top/middle use ASS alignments 8/5. Explicit zero outlines stay zero. Subtitle/restyle output IDs use nanoseconds to avoid same-second URL reuse. CSS active-word animations remain an approximation of libass effects; face-aware hook avoidance can also shift server captions.
+
+Caption outline regression: preview/browser exports use a continuous CSS stroke painted before the fill, rather than four offset copies of each glyph. This preserves thick outlines without the duplicated-word artifact. Covered by dashboard/tests/subtitleGeometry.test.cjs.
