@@ -18,3 +18,5 @@ Fork: https://github.com/Nedi11/openshorts (personal branch)
 - Editor additions: preserve EDIT-001/002 and CAPTION-001, including CENTER routing before source subtitle trimming, queue decorators and UI, and matching native caption preset fields. Run tests/custom/ plus rerender/reframe/caption endpoint tests on updates.
 
 - Queue reliability: preserve best-effort history persistence, history validation and pruning, same-clip revision checks, guarded UI actions, isolated browser subscribers and the polling timeout/stale-state UI. Run Python queue tests and `node --test src/lib/browserRenderQueue.test.js tests/renderQueue.test.cjs` from dashboard/ on every merge.
+
+- RENDER-001: keep the editor hook path on the existing combined-overlay renderer and preserve the lazy hook-only recipe, caption style/word timing, layouts, audio and unique output names. Regression tests assert one encode and no separate caption reapply during hook updates.

@@ -1141,6 +1141,29 @@ def _unmark_local_job(job_id, clip_index, clean_filename):
             pass
 
 
+def _caption_context(data, clip_index):
+    """Saved caption text and timing on either the source or edited clip timeline."""
+    transcript = data.get('transcript')
+    clips = data.get('shorts', [])
+    if not transcript or not 0 <= clip_index < len(clips):
+        return None
+    clip = clips[clip_index]
+    # A recut clip is a concatenation of source segments, so the flat
+    # start..end window is wrong for it — caption against the clip-relative
+    # remapped transcript instead (same trick /api/subtitle uses).
+    recipe_segments = (clip.get('recipe') or {}).get('segments')
+    if recipe_segments:
+        transcript = recut.virtual_transcript(transcript, recipe_segments)
+        start, end = 0.0, recut.total_duration(recipe_segments)
+    else:
+        start, end = clip['start'], clip['end']
+    if clip.get('caption_words'):
+        transcript = _words_transcript(clip['caption_words'],
+                                       transcript.get('language', 'en'))
+        start, end = 0.0, transcript['segments'][0]['end']
+    return clip, transcript, start, end
+
+
 def _reapply_captions(job_id, clip_index, video_path):
     """Re-burn the default captions onto a freshly derived file.
 
@@ -1158,24 +1181,10 @@ def _reapply_captions(job_id, clip_index, video_path):
             return None
         with open(meta_files[0], 'r') as f:
             data = json.load(f)
-        transcript = data.get('transcript')
-        clips = data.get('shorts', [])
-        if not transcript or clip_index >= len(clips):
+        context = _caption_context(data, clip_index)
+        if context is None:
             return None
-        clip = clips[clip_index]
-        # A recut clip is a concatenation of source segments, so the flat
-        # start..end window is wrong for it — caption against the clip-relative
-        # remapped transcript instead (same trick /api/subtitle uses).
-        recipe_segments = (clip.get('recipe') or {}).get('segments')
-        if recipe_segments:
-            transcript = recut.virtual_transcript(transcript, recipe_segments)
-            start, end = 0.0, recut.total_duration(recipe_segments)
-        else:
-            start, end = clip['start'], clip['end']
-        if clip.get('caption_words'):
-            transcript = _words_transcript(clip['caption_words'],
-                                           transcript.get('language', 'en'))
-            start, end = 0.0, transcript['segments'][0]['end']
+        clip, transcript, start, end = context
         if clip.get('caption_style'):
             return _restyle_captions(video_path, transcript, start, end,
                                      clip['caption_style'],
@@ -1215,11 +1224,8 @@ def _words_transcript(words, language="en"):
     }
 
 
-def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
-                        style, split_ranges=None):
-    """Generate the caption file for ``style`` (CAPTION_STYLE_FIELDS, a
-    missing field takes the SubtitleRequest default) and burn it onto
-    ``video_path``. Returns False when no words fall in the range."""
+def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges=None):
+    """Write the saved caption file without encoding video; return its normalized style."""
     s = {k: SubtitleRequest.model_fields[k].default for k in CAPTION_STYLE_FIELDS}
     s.update({k: v for k, v in (style or {}).items() if k in s})
     max_chars = (max(1, min(40, int(s["max_chars"])))
@@ -1245,6 +1251,15 @@ def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
         ok = generate_srt(transcript, start, end, sub_path,
                           max_chars or 20, max_duration or 2.0)
     if not ok:
+        return None
+    return s
+
+
+def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
+                        style, split_ranges=None):
+    """Write and burn saved captions. Return False when there are no words."""
+    s = _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges)
+    if s is None:
         return False
     burn_subtitles(video_path, sub_path, out_path,
                    alignment=s["position"], fontsize=s["font_size"],
@@ -6020,7 +6035,8 @@ async def add_hook(req: HookRequest, request: Request):
         output_path = input_path
         reservation_id = None
     else:
-        output_filename = f"hooked_{int(time.time())}_{filename}"
+        generation_id = time.time_ns()
+        output_filename = f"hooked_{generation_id}_{filename}"
         output_path = os.path.join(output_dir, output_filename)
 
         # Map Size to Scale
@@ -6035,14 +6051,44 @@ async def add_hook(req: HookRequest, request: Request):
         try:
             # Run in thread pool
             def run_hook():
-                return add_hook_to_video(
-                    input_path, req.text, output_path, position=req.position or "auto",
+                also = None
+                final_name = output_filename
+                if had_captions:
+                    from subtitles import AUTO_CAPTION_STYLE, subtitles_filter
+                    context = _caption_context(data, req.clip_index)
+                    if context is None:
+                        raise RuntimeError('Cannot preserve captions: the saved transcript is unavailable.')
+                    saved_clip, transcript, start, end = context
+                    saved_style = saved_clip.get('caption_style') or {
+                        **AUTO_CAPTION_STYLE, 'position': AUTO_CAPTION_STYLE['alignment']}
+                    suffix = 'ass' if saved_style.get('style') == 'karaoke' else 'srt'
+                    sub_path = os.path.join(output_dir, f'subs_hook_{uuid.uuid4().hex}.{suffix}')
+                    ranges = saved_clip.get('layout_ranges') or layout_ranges.read(input_path)
+                    style = _prepare_caption_style(
+                        sub_path, transcript, start, end, saved_style,
+                        layout_ranges.split_ranges(ranges))
+                    if style is None:
+                        raise RuntimeError('Cannot preserve captions: no words were found for this clip.')
+                    vf = subtitles_filter(
+                        sub_path, alignment=style['position'], fontsize=style['font_size'],
+                        font_name=style['font_name'], font_color=style['font_color'],
+                        border_color=style['border_color'], border_width=style['border_width'],
+                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'])
+                    final_name = f'subtitled_{generation_id}_{output_filename}'
+                    also = (vf, os.path.join(output_dir, final_name))
+                add_hook_to_video(
+                    input_path, req.text, output_path, position=req.position or 'auto',
                     font_scale=font_scale, duration=req.duration_seconds, style=req.style,
                     font=req.font, layout_ranges=clip_data.get('layout_ranges'),
-                    has_captions=had_captions)
+                    has_captions=had_captions, also=also)
+                if also:
+                    sidecar = [(r['start'], r['end'], r['layout'], r.get('content')) for r in ranges]
+                    layout_ranges.write(output_path, sidecar)
+                    layout_ranges.write(also[1], sidecar)
+                return final_name
 
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, run_hook)
+            output_filename = await loop.run_in_executor(None, run_hook)
 
         except Exception as e:
             print(f"❌ Hook Error: {e}")
@@ -6053,8 +6099,8 @@ async def add_hook(req: HookRequest, request: Request):
         if reservation_id:
             await _metering.commit_reservation(reservation_id)
 
-    # Captions back on top (see /api/edit for the same invariant).
-    if had_captions:
+    # Adding/updating hooks already included captions in the same filter graph.
+    if had_captions and req.remove:
         recap = await asyncio.get_event_loop().run_in_executor(
             None, _reapply_captions, req.job_id, req.clip_index, output_path)
         if recap:

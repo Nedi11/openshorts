@@ -1,5 +1,7 @@
 import asyncio
 import json
+import subprocess
+import hooks
 from pathlib import Path
 
 import httpx
@@ -35,6 +37,8 @@ def clip(tmp_path, monkeypatch):
         return True
     def hook(video,text,out,**kwargs):
         Path(out).write_bytes(b'hooked')
+        if kwargs.get('also'):
+            Path(kwargs['also'][1]).write_bytes(b'combined')
     monkeypatch.setattr(api, '_burn_caption_style', burn)
     monkeypatch.setattr(api, 'add_hook_to_video', hook)
     return path, burns
@@ -71,3 +75,84 @@ def test_explicit_empty_words_resets_to_original_transcript(clip):
     assert response.status_code == 200
     assert burns[-1]['words'][0]['word'] == 'Original'
     assert 'caption_words' not in json.loads(path.read_text())['shorts'][0]
+
+
+@pytest.mark.parametrize('preset', ['native', 'classic', 'default', 'legacy'])
+def test_hook_and_captions_use_one_encode_and_keep_lazy_hook_recipe(clip, monkeypatch, preset):
+    path, _ = clip
+    metadata = json.loads(path.read_text())
+    captioned = path.parent/'subtitled_1_base_clip_1.mp4'
+    captioned.write_bytes(b'captioned')
+    metadata['shorts'][0].update(video_url=f'/videos/{JOB}/{captioned.name}',
+        caption_style={**api.CAPTION_PRESETS.get(preset, {'style':'classic','font_name':'Arial','font_size':20}), 'position':'bottom'},
+        caption_words=[{'word':' Corrected','start':0,'end':.9}],
+        layout_ranges=[{'start':0,'end':2,'layout':'split'}])
+    if preset == 'legacy':
+        metadata['shorts'][0].pop('caption_style')
+    path.write_text(json.dumps(metadata))
+    commands=[]
+    def encode(command, video, outputs):
+        commands.append(command)
+        assert len(outputs) == 1
+        for output in outputs: Path(output).write_bytes(b'combined')
+        return subprocess.CompletedProcess(command, 0, b'', b'')
+    monkeypatch.setattr(api, 'add_hook_to_video', hooks.add_hook_to_video)
+    monkeypatch.setattr(hooks, 'LAZY', True)
+    monkeypatch.setattr(hooks, '_run_encode', encode)
+    monkeypatch.setattr(hooks.subprocess, 'check_output', lambda *args,**kwargs: b'1080x1920\n')
+    monkeypatch.setattr(api, '_reapply_captions', lambda *args: pytest.fail('second caption pass'))
+    filenames = []
+    for text in ('First hook','Updated hook'):
+        response=request('POST','/api/hook',{'job_id':JOB,'clip_index':0,'text':text,'position':'top'})
+        assert response.status_code == 200, response.text
+        filename=response.json()['new_video_url'].split('/')[-1]
+        filenames.append(filename)
+        assert filename.startswith('subtitled_') and (path.parent/filename).exists()
+        hook_name=filename.split('_',2)[2]
+        assert not (path.parent/hook_name).exists()
+        assert hooks.has_recipe(str(path.parent),hook_name)
+        command=commands[-1]
+        graph=command[command.index('-filter_complex')+1]
+        assert 'overlay=' in graph
+        assert ('ass=filename=' if preset != 'classic' else 'subtitles=filename=') in graph
+        assert '[h]' not in graph
+        assert command.count('-c:v') == 1
+        assert api.layout_ranges.read(str(path.parent/filename))[0]['layout']=='split'
+    assert len(commands)==2
+    assert len(set(filenames))==2
+    subfile=next(path.parent.glob('subs_hook_*.'+('srt' if preset=='classic' else 'ass')))
+    assert 'corrected' in subfile.read_text().lower()
+    if preset=='native':
+        assert 'Style: Default,Arial,13,' in subfile.read_text()
+
+
+@pytest.mark.parametrize('transcript', [None, {'segments': []}])
+def test_missing_caption_transcript_fails_before_encoding(clip,monkeypatch,transcript):
+    path,_=clip
+    metadata=json.loads(path.read_text())
+    captioned=path.parent/'subtitled_1_base_clip_1.mp4';captioned.write_bytes(b'captioned')
+    metadata['shorts'][0]['video_url']=f'/videos/{JOB}/{captioned.name}'
+    metadata['transcript']=transcript
+    path.write_text(json.dumps(metadata))
+    monkeypatch.setattr(api,'add_hook_to_video',lambda *args,**kwargs:pytest.fail('must not encode'))
+    before=path.read_text()
+    response=request('POST','/api/hook',{'job_id':JOB,'clip_index':0,'text':'Hook'})
+    assert response.status_code==500
+    assert 'Cannot preserve captions' in response.json()['detail']
+    assert path.read_text()==before
+
+
+def test_failed_combined_encode_keeps_the_previous_clip(clip, monkeypatch):
+    path, _ = clip
+    response = request('POST', '/api/subtitle', {'job_id': JOB, 'clip_index': 0, 'preset': 'native'})
+    assert response.status_code == 200
+    before = path.read_text()
+    previous_url = api.jobs[JOB]['result']['clips'][0]['video_url']
+    def fail(*args, **kwargs):
+        raise RuntimeError('Encoder failed')
+    monkeypatch.setattr(api, 'add_hook_to_video', fail)
+    monkeypatch.setattr(api, '_reapply_captions', lambda *args: pytest.fail('must not encode a fallback'))
+    response = request('POST', '/api/hook', {'job_id': JOB, 'clip_index': 0, 'text': 'New hook'})
+    assert response.status_code == 500
+    assert path.read_text() == before
+    assert api.jobs[JOB]['result']['clips'][0]['video_url'] == previous_url
