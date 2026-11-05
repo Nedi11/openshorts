@@ -262,6 +262,9 @@ _PRESET_BASE = {"style": "karaoke", "font_color": "#FFFFFF", "bg_opacity": 0.0,
                 "base_opacity": 1.0, "reveal": False, "shadow": 0,
                 "max_duration": 1.4}
 CAPTION_PRESETS = {
+    "native": {**_PRESET_BASE, "font_name": "Arial", "font_size": 16,
+               "highlight_color": "#FFFFFF", "border_width": 0, "shadow": 1,
+               "effect": "none", "uppercase": False, "max_chars": 38},
     "default": {**_PRESET_BASE, "font_name": "Anton", "font_size": 44,
                 "highlight_color": "#FFE500", "border_width": 4, "effect": "pop",
                 "uppercase": True, "max_chars": 16},

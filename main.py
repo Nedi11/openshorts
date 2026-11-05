@@ -1496,6 +1496,12 @@ def render_clip(input_video, final_output_video, output_format="auto",
     source's own burned-in subtitles off the bottom first, so our captions are
     the only text layer. Every render from the source passes it: the job, the
     recut and the editor's re-render."""
+    if force_strategy == 'CENTER' and output_format != 'horizontal':
+        from centered_fit import render_centered
+        ok = render_centered(input_video, final_output_video, output_format)
+        if ok and watermark:
+            apply_watermark(final_output_video)
+        return ok
     trimmed = trim_subtitle_band(input_video, subtitle_band)
     try:
         return _render_clip(trimmed, final_output_video, output_format,

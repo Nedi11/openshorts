@@ -352,6 +352,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     const newLayers = { ...activeLayers, effects: data.effects };
                     setActiveLayers(newLayers);
                     const blobUrl = await renderInBrowser({
+                        jobId, clipIndex: index,
                         videoUrl: originalVideoUrl,
                         durationInSeconds: clipDuration,
                         subtitles: newLayers.subtitles,
@@ -428,6 +429,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 setActiveLayers(remaining);
                 if (remaining.hook || remaining.effects) {
                     setCurrentVideoUrl(await renderInBrowser({
+                        jobId, clipIndex: index,
                         videoUrl: serverUrl,
                         durationInSeconds: clipDuration,
                         subtitles: null,
@@ -460,6 +462,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 const newLayers = { ...activeLayers, subtitles: options.remotion };
                 setActiveLayers(newLayers);
                 const blobUrl = await renderInBrowser({
+                        jobId, clipIndex: index,
                     videoUrl: originalVideoUrl,
                     durationInSeconds: clipDuration,
                     subtitles: newLayers.subtitles,
@@ -515,6 +518,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 setActiveLayers(remaining);
                 if (remaining.hook || remaining.effects) {
                     const blobUrl = await renderInBrowser({
+                        jobId, clipIndex: index,
                         videoUrl: serverUrl,
                         durationInSeconds: clipDuration,
                         subtitles: null,
@@ -545,6 +549,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 const newLayers = { ...activeLayers, hook: hookData.remotion };
                 setActiveLayers(newLayers);
                 const blobUrl = await renderInBrowser({
+                        jobId, clipIndex: index,
                     videoUrl: originalVideoUrl,
                     durationInSeconds: clipDuration,
                     subtitles: newLayers.subtitles,

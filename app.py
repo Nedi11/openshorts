@@ -2692,6 +2692,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Personal fork: visible FIFO for edits on the single-worker self-host backend.
+from render_queue import RenderQueue
+_edit_render_queue = RenderQueue(os.path.join(OUTPUT_DIR, '.render-queue.json'),
+                                 enabled=lambda: not BILLING_ENABLED)
+
+@app.get('/api/render-queue')
+async def render_queue_status():
+    if BILLING_ENABLED:
+        raise HTTPException(404, 'Not found')
+    return {'renders': _edit_render_queue.snapshot()}
+
+
 # Personal fork: isolated self-host scheduling adapter.
 import postiz_integration
 app.include_router(postiz_integration.create_router(OUTPUT_DIR))
@@ -4461,6 +4473,7 @@ class EditRequest(BaseModel):
     input_filename: Optional[str] = None
 
 @app.post("/api/edit")
+@_edit_render_queue.track("Auto edit")
 async def edit_clip(
     req: EditRequest,
     request: Request,
@@ -4860,7 +4873,7 @@ class RerenderRequest(BaseModel):
 # Manual framing -> reframe-engine strategy. 'full' shows the whole source
 # frame (WIDE: no side-cropping, blurred filler bands); 'track' forces the
 # subject-tracking crop. Anything non-auto needs the retained source video.
-_FRAMING_STRATEGIES = {"auto": None, "full": "WIDE", "track": "TRACK"}
+_FRAMING_STRATEGIES = {"auto": None, "full": "WIDE", "track": "TRACK", "center": "CENTER"}
 
 
 # One lock per job (same pattern as _restore_locks): rerenders on the same job
@@ -4873,6 +4886,7 @@ _scenes_locks: Dict[str, asyncio.Lock] = {}
 
 
 @app.post("/api/clip/rerender")
+@_edit_render_queue.track("Re-render clip")
 async def rerender_clip(req: RerenderRequest, request: Request):
     """Re-render a clip from an edited EDL (the clip editor's save button).
 
@@ -4925,7 +4939,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
     framing = req.framing or (clip.get('recipe') or {}).get('framing') or 'auto'
     if framing not in _FRAMING_STRATEGIES:
         raise HTTPException(status_code=400,
-                            detail="framing must be one of: auto, full, track")
+                            detail="framing must be one of: auto, full, track, center")
     force_strategy = _FRAMING_STRATEGIES[framing]
 
     try:
@@ -5252,6 +5266,7 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
 
 
 @app.post("/api/clip/reframe")
+@_edit_render_queue.track("Reframe clip")
 async def reframe_clip(req: ReframeRequest, request: Request):
     """Re-render a clip with hand-framed scenes, leaving its cut untouched.
 
@@ -5327,6 +5342,8 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
     # applies to the scenes the user did NOT hand-position: apply_crop_overrides
     # runs after force_strategy, so a per-scene choice beats the whole-clip one.
     framing = (clip.get('recipe') or {}).get('framing') or 'auto'
+    if framing == 'center' and overrides:
+        framing = 'track'
     force_strategy = _FRAMING_STRATEGIES.get(framing)
 
     # A reframe re-renders the full cut from source — same work as a source-path
@@ -5619,6 +5636,7 @@ async def generate_effects_config(
 
 
 @app.post("/api/subtitle")
+@_edit_render_queue.track("Apply captions")
 async def add_subtitles(req: SubtitleRequest, request: Request):
     if req.preset:
         preset = CAPTION_PRESETS.get(req.preset.strip().lower())
@@ -5849,6 +5867,7 @@ class RemoveSubtitlesRequest(BaseModel):
 
 
 @app.post("/api/subtitle/remove")
+@_edit_render_queue.track("Remove captions")
 async def remove_subtitles(req: RemoveSubtitlesRequest, request: Request):
     """Point a clip back at its un-captioned original.
 
@@ -5920,6 +5939,7 @@ class HookRequest(BaseModel):
     remove: Optional[bool] = False  # strip the burned hook instead of adding one
 
 @app.post("/api/hook")
+@_edit_render_queue.track("Apply hook")
 async def add_hook(req: HookRequest, request: Request):
     await require_managed_entitlement(request)
     await _ensure_job_files(req.job_id, request)

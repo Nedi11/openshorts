@@ -11,3 +11,8 @@ print("Feature inventory intact (not a runtime scheduling test)")
 assert (root / "postiz_integration.py").is_file()
 assert (root / "tests/custom/test_postiz.py").is_file()
 assert "PostizSchedule" in (root / "dashboard/src/components/ResultCard.jsx").read_text()
+
+for feature in ["EDIT-001", "EDIT-002", "CAPTION-001"]:
+    assert f"| {feature} |" in text, f"Missing feature: {feature}"
+assert "RenderQueue" in (root / "dashboard/src/App.jsx").read_text()
+assert "'center'" in (root / "dashboard/src/components/ClipEditor.jsx").read_text()

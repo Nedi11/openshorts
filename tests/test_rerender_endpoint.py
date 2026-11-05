@@ -345,3 +345,18 @@ class TestMcpTool:
         names = [t["name"] for t in mcp_server.TOOLS]
         assert "recut_clip" in names
         assert "recut_clip" in mcp_server._TOOL_IMPLS
+
+
+def test_center_framing_uses_source_and_persists(job, fake_recut):
+    response = _request('POST', '/api/clip/rerender', {
+        'job_id': JOB_ID, 'clip_index': 0, 'framing': 'center',
+        'segments': [{'start': 12, 'end': 22}]})
+    assert response.status_code == 200
+    assert response.json()['recipe']['framing'] == 'center'
+    assert fake_recut[0]['force_strategy'] == 'CENTER'
+    assert fake_recut[0]['reframe'] is True
+    followup = _request('POST', '/api/clip/rerender', {
+        'job_id': JOB_ID, 'clip_index': 0,
+        'segments': [{'start': 13, 'end': 21}]})
+    assert followup.json()['framing'] == 'center'
+    assert fake_recut[1]['force_strategy'] == 'CENTER'
