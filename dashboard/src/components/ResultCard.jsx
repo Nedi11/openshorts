@@ -13,6 +13,9 @@ import WatermarkModal, { watermarkNoticeDismissed } from './WatermarkModal';
 import TikTokDraftNotice from './TikTokDraftNotice';
 import { useAuth } from '../contexts/AuthContext';
 import { renderInBrowser } from '../lib/renderInBrowser';
+import { isBrowserClipRendering } from '../lib/browserRenderQueue';
+
+const CLIP_BUSY_MESSAGE = 'This clip is already rendering. Wait for it to finish before applying another edit.';
 
 const QUIET_BTN = 'group flex flex-col items-center justify-center gap-1 py-2.5 sm:py-2 px-1 rounded-input border border-rule hover:bg-paper3 text-[11px] lowercase text-ink2 whitespace-nowrap transition-colors disabled:opacity-45 disabled:cursor-not-allowed';
 
@@ -242,6 +245,21 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [showHookModal, setShowHookModal] = useState(false);
     const [showTranslateModal, setShowTranslateModal] = useState(false);
     const [editError, setEditError] = useState(null);
+    const editInFlight = useRef(false);
+    const clipBusy = isEditing || isSubtitling || isHooking || isTranslating;
+    const beginClipEdit = () => {
+        if (editInFlight.current || isBrowserClipRendering(jobId, index)) {
+            setEditError(CLIP_BUSY_MESSAGE);
+            return false;
+        }
+        editInFlight.current = true;
+        return true;
+    };
+    const finishClipEdit = () => {
+        editInFlight.current = false;
+        setEditError(current => current === CLIP_BUSY_MESSAGE ? null : current);
+    };
+
 
     const [clipDuration, setClipDuration] = useState(() => {
         const secs = clipDurationSeconds(clip);
@@ -320,6 +338,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     }, [showModal, clip]);
 
     const handleAutoEdit = async () => {
+        if (!beginClipEdit()) return;
         setIsEditing(true);
         setEditError(null);
         try {
@@ -402,6 +421,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsEditing(false);
         }
     };
@@ -410,6 +430,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     // Nothing is re-encoded: the server still holds the clean file next to the
     // captioned one and just points this clip back at it.
     const handleRemoveSubtitles = async () => {
+        if (!beginClipEdit()) return;
         setIsSubtitling(true);
         setEditError(null);
         try {
@@ -446,11 +467,13 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsSubtitling(false);
         }
     };
 
     const handleSubtitle = async (options) => {
+        if (!beginClipEdit()) return;
         setIsSubtitling(true);
         setEditError(null);
         try {
@@ -536,11 +559,13 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsSubtitling(false);
         }
     };
 
     const handleHook = async (hookData) => {
+        if (!beginClipEdit()) return;
         setIsHooking(true);
         setEditError(null);
         try {
@@ -596,12 +621,14 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsHooking(false);
         }
     };
 
     // Strip the burned hook (auto-hook or manual) off the server file.
     const handleRemoveHook = async () => {
+        if (!beginClipEdit()) return;
         setIsHooking(true);
         setEditError(null);
         try {
@@ -628,11 +655,13 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsHooking(false);
         }
     };
 
     const handleTranslate = async (options) => {
+        if (!beginClipEdit()) return;
         console.log('[Translate] Starting translation with options:', options);
         setIsTranslating(true);
         setEditError(null);
@@ -692,6 +721,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
             setEditError(e.message);
             setTimeout(() => setEditError(null), 5000);
         } finally {
+            finishClipEdit();
             setIsTranslating(false);
         }
     };
@@ -968,6 +998,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     {onEditClip && (
                         <button
                             onClick={() => onEditClip(index)}
+                            disabled={clipBusy}
                             className={QUIET_BTN}
                         >
                             <Scissors size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />
@@ -978,6 +1009,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     {onReframeClip && (
                         <button
                             onClick={() => onReframeClip(index)}
+                            disabled={clipBusy}
                             className={QUIET_BTN}
                         >
                             <Crosshair size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />
@@ -987,7 +1019,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
 
                     <button
                         onClick={handleAutoEdit}
-                        disabled={isEditing}
+                        disabled={clipBusy}
                         className={QUIET_BTN}
                     >
                         {isEditing ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Wand2 size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
@@ -996,7 +1028,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
 
                     <button
                         onClick={() => setShowSubtitleModal(true)}
-                        disabled={isSubtitling}
+                        disabled={clipBusy}
                         className={QUIET_BTN}
                     >
                         {isSubtitling ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Type size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
@@ -1005,7 +1037,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
 
                     <button
                         onClick={() => setShowHookModal(true)}
-                        disabled={isHooking}
+                        disabled={clipBusy}
                         className={QUIET_BTN}
                     >
                         {isHooking ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Wand2 size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
@@ -1014,7 +1046,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
 
                     <button
                         onClick={() => setShowTranslateModal(true)}
-                        disabled={isTranslating}
+                        disabled={clipBusy}
                         className={QUIET_BTN}
                     >
                         {isTranslating ? <Loader2 size={16} className="animate-spin text-brass shrink-0" /> : <Languages size={16} className="text-muted group-hover:text-brass transition-colors shrink-0" />}
@@ -1220,7 +1252,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 onRemove={handleRemoveSubtitles}
                 bulkCount={clipCount}
                 bulkProgress={bulkProgress}
-                isProcessing={isSubtitling || (bulkProgress?.running ?? false)}
+                isProcessing={clipBusy || (bulkProgress?.running ?? false)}
                 videoUrl={originalVideoUrl}
                 jobId={jobId}
                 clipIndex={index}
@@ -1231,7 +1263,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                 isOpen={showHookModal}
                 onClose={() => setShowHookModal(false)}
                 onGenerate={handleHook}
-                isProcessing={isHooking}
+                isProcessing={clipBusy}
                 videoUrl={originalVideoUrl}
                 initialText={clip.viral_hook_text}
                 durationInSeconds={clip.end && clip.start ? clip.end - clip.start : 30}
