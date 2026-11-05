@@ -13,6 +13,7 @@
 | EDIT-002 | implemented | Visible browser and self-host server FIFOs with queued/running/completed/failed states, clip/job identity, elapsed time and server restart recovery | render_queue.py; dashboard/src/components/RenderQueue.jsx; tests/custom/test_editor_additions.py; tests/custom/test_render_queue_reliability.py; dashboard/src/lib/browserRenderQueue.test.js; dashboard/tests/renderQueue.test.cjs |
 | CAPTION-001 | implemented | Native clean preset uses smaller sentence-case Arial, white text, no outline and a soft shadow | subtitles.py; dashboard/src/components/SubtitleModal.jsx; tests/custom/test_editor_additions.py |
 | CAPTION-002 | implemented | Saved caption styling and edited words reload after hook updates and survive later style-only applies | app.py; dashboard/src/components/SubtitleModal.jsx; tests/test_hook_caption_persistence.py; dashboard/tests/captionPersistence.test.cjs |
+| RENDER-001 | implemented | Hook updates compose hook and saved captions in one FFmpeg encode by default, keeping a lazy hook-only recipe for later restyling | app.py; hooks.py also path; tests/test_hook_caption_persistence.py |
 | GPU-001 | implemented | Explicit AMD/Intel VAAPI H.264 encoding with real device probe and CPU fallback; retain CPU filters, captions, hooks, framing and audio maps | ffmpeg_utils.py; vaapi_ffmpeg.py; bin/ffmpeg; Dockerfile; tests/custom/test_vaapi.py |
 
 For each implemented scheduling feature add file links, behavior tests, timezone/error cases and a manual acceptance result. Do not mark implemented on documentation alone.
@@ -42,3 +43,7 @@ The actual burn_subtitles/add_hook_to_video functions also succeeded on a real
 1080x1920 clip; a device-less container correctly selected x264.
 
 Caption editor initialization reads the saved style and edited words from the clip transcript endpoint. Applying a style without new words preserves saved corrections. An explicit empty words array restores the original transcript. Applying is disabled until saved settings load successfully. Hook-update/removal and modal-remount regression tests preserve CAPTION-001 and CAPTION-002.
+
+Hook updates reuse hooks.add_hook_to_video(also=...) with the existing default HOOK_LAZY=1. Saved caption text, styles, edited timelines and layout ranges are prepared before encoding. The combined output gets a unique numeric generation ID. Hook removal keeps its caption-only pass. Setting HOOK_LAZY=0 explicitly retains two output encodes in one FFmpeg invocation. The existing recipe-write-failure fallback can materialize the hook-only file as an additional encode. Watermark delivery retains its existing behavior.
+
+Manual acceptance: an isolated container on the desktop AMD VAAPI device produced one combined H.264 encode for both native ASS and classic SRT captions, with audio, 1080x1920 geometry, duration, saved style and edited words preserved. This used a synthetic eight-second clip, not the earlier 71-second operation.
