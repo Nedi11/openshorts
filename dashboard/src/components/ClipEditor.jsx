@@ -7,7 +7,7 @@ import {
 import { getApiUrl, withParam } from '../config';
 import { apiFetch, apiJson, QuotaError, openQuotaWall } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { censorSections, adjust, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEP } from '../lib/censorSections';
+import { censorSections, adjust, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEPS } from '../lib/censorSections';
 
 // Full-screen clip editor: shows WHICH source segments a clip was cut from,
 // lets the user trim/extend/split/reorder them (word-snapped), and re-renders
@@ -123,6 +123,9 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     // Background music: off | remove | reduce (music_removal.py).
     const [musicMode, setMusicMode] = useState('off');
     const [musicDb, setMusicDb] = useState(18);
+    // Seconds per click on a censor section's edge buttons.
+    const [censorStep, setCensorStep] = useState(0.05);
+    const STEP = censorStep;
     const [renderedFraming, setRenderedFraming] = useState('auto');
     // The recipe of the currently RENDERED preview (playhead maps onto it).
     const [renderedSegments, setRenderedSegments] = useState(null);
@@ -1600,7 +1603,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                             ))}
                                         </ul>
                                     )}
-                                    <p className="text-[11px] text-muted mt-1">◀ earlier · ▶ later, 0.05s per click. Start/End move one edge, Move shifts the whole section. Times are on the edited clip.</p>
+                                    <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-muted">step
+                                        {STEPS.map((st) => (
+                                            <button key={st} type="button" aria-pressed={censorStep === st} onClick={() => setCensorStep(st)}
+                                                className={`px-1.5 rounded-input border ${censorStep === st ? 'border-[color:var(--color-accent)] text-ink' : 'border-rule2'}`}>{st}s</button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[11px] text-muted mt-1">◀ earlier · ▶ later, one step per click. Start/End move one edge, Move shifts the whole section. Sections can be as short as 0.01s. Times are on the edited clip.</p>
                                 </div>
                             </>}
                         </div>

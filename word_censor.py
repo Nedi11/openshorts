@@ -22,7 +22,8 @@ MAX_PAD = 1.0          # global padding, each side
 # Per-word adjustment bound, each side, either direction. Effectively
 # unlimited: sections clamp to the segment holding the word anyway.
 MAX_NUDGE = 600.0
-MIN_SECTION = 0.04
+# Shortest section that is applied; the editor goes down to the same 0.01 s.
+MIN_SECTION = 0.01
 
 
 def normalize(word):

@@ -145,7 +145,7 @@ def test_crossed_nudges_are_refused_instead_of_leaving_the_word_in():
         censor.sections(TRANSCRIPT, crossed, [{'start': 0, 'end': 3}])
     # A word that only grazes the segment edge is still just left out.
     assert censor.sections(TRANSCRIPT, _settings(pad_before=0, pad_after=0),
-                           [{'start': 1.48, 'end': 3}]) == []
+                           [{'start': 1.495, 'end': 3}]) == []
 
 
 def test_per_word_adjustments_are_not_limited_to_one_second():
@@ -154,3 +154,14 @@ def test_per_word_adjustments_are_not_limited_to_one_second():
     [section] = censor.sections(TRANSCRIPT, settings, [{'start': 0, 'end': 3}])
     # 1.5 s earlier is clamped by the segment start, 1.25 s later by nothing.
     assert (section['start'], section['end']) == (0, 2.75)
+
+
+def test_sections_down_to_a_hundredth_of_a_second_are_applied():
+    # A 0.02 s piece of a word is cut, not dropped.
+    tiny = _settings(pad_before=0, pad_after=0, adjustments={'1': {'before': -0.2, 'after': -0.28}})
+    [section] = censor.sections(TRANSCRIPT, tiny, [{'start': 0, 'end': 3}])
+    assert (section['start'], section['end']) == (1.2, 1.22)
+    assert censor.cut_segments([{'start': 0, 'end': 3}], [section]) == [
+        {'start': 0, 'end': 1.2}, {'start': 1.22, 'end': 3}]
+    settings = dict(tiny, mode='bleep')
+    assert censor.to_clip_time([section], [{'start': 0, 'end': 3}]) == [[1.2, 1.22]]

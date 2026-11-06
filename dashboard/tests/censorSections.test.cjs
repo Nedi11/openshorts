@@ -57,7 +57,7 @@ test('the reported crossed case is flagged, and reset or widening repairs it', (
 });
 
 test('edge moves stop at the minimum length; move shifts both edges', () => {
-  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});   // 0.5 s long
+  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});   // 0.5 s long, 0.05 s steps
   let adj = {};
   let current = sec;
   for (let i = 0; i < 20; i++) {
@@ -66,7 +66,11 @@ test('edge moves stop at the minimum length; move shifts both edges', () => {
     adj = next;
     [current] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj);
   }
-  assert.ok(current.end - current.start >= 0.1 - 1e-9 && current.end - current.start < 0.15);
+  // 0.05 s steps stop at 0.05 s (one more would reach zero); 0.01 s steps go to 0.01 s.
+  assert.ok(Math.abs(current.end - current.start - 0.05) < 1e-9);
+  const fine = moveEdge(adj, current, 'end', -0.01);
+  [current] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, fine);
+  assert.ok(Math.abs(current.end - current.start - 0.04) < 1e-9);
   const [moved] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, moveEdge({}, sec, 'move', 0.05));
   assert.deepEqual([moved.start, moved.end], [1.05, 1.55]);
 });
@@ -78,4 +82,18 @@ test('per-word moves go past one second', () => {
   for (let i = 0; i < 30; i++) { adj = moveEdge(adj, cur, 'end', 0.05); [cur] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj); }
   assert.equal(adj['1.000'].after, 1.5);
   assert.equal(cur.end, 3);   // clamped by the segment, not by a nudge limit
+});
+
+test('a 0.07 s section shrinks to 0.02 s and is still applied', () => {
+  const word = [{w:'shit', s:80.9, e:80.95}];
+  const seg = [{start:0, end:100}];
+  let [sec] = censorSections(word, ['shit'], seg, 0.01, 0.01, {});   // 80.89-80.96
+  assert.deepEqual([sec.start, sec.end], [80.89, 80.96]);
+  let adj = {};
+  for (const [edge, d] of [['start', 0.01], ['start', 0.01], ['end', -0.01], ['end', -0.01], ['end', -0.01]]) {
+    adj = moveEdge(adj, sec, edge, d);
+    [sec] = censorSections(word, ['shit'], seg, 0.01, 0.01, adj);
+  }
+  assert.deepEqual([sec.start, sec.end, sec.crossed, sec.tooShort], [80.91, 80.93, false, false]);
+  assert.equal(moveEdge(adj, sec, 'end', -0.02), null);   // would leave nothing
 });
