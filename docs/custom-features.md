@@ -252,3 +252,10 @@ RenderQueueSlot: the clip editor's header while it is open, else the app
 header. Its list opens as a dropdown on click and closes on an outside click or
 Escape. There is still one queue instance, so polling and cancel state are
 shared. Tests: dashboard/tests/renderQueue.test.cjs.
+
+EDIT-006 (implemented): the hook and caption previews find the clean base clip
+for titles containing "$". The path was rebuilt with String.replace and a
+replacement STRING, which reads "$$" as "$" (also "$&", "$1"). A clip titled
+"...MORE $$ THAN ROLEX" pointed at a file that does not exist, so the preview
+showed the hook text without the video. lib/cleanClipUrl.js passes the name
+through a function. Tests: dashboard/tests/cleanClipUrl.test.cjs.

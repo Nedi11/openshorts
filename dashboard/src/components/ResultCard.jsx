@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Download, Share2, Instagram, Youtube, Video, AlertCircle, Loader2, Copy, Check, Wand2, Type, Calendar, Languages, FileText, Link2, Scissors, Crosshair, TrendingUp } from 'lucide-react';
 import { getApiUrl } from '../config';
+import { cleanClipPath } from '../lib/cleanClipUrl';
 import { apiFetch } from '../lib/api';
 import { track } from '../lib/analytics';
 import SubtitleModal from './SubtitleModal';
@@ -88,16 +89,8 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
     const [showWatermarkModal, setShowWatermarkModal] = useState(false);
     const { plan } = useAuth();
     const videoRef = React.useRef(null);
-    // Pristine base clip (no burned subtitles/hook), stable regardless of how
-    // clip.video_url mutates after server edits. Used as the compositing base
-    // for the Remotion preview so it never stacks subtitles over an already-
-    // subtitled file (double-subtitle bug).
-    const stripBurns = (filename) => {
-        let f = filename || '', prev;
-        do { prev = f; f = f.replace(/^subtitled_\d+_/, '').replace(/^hooked_\d+_/, '').replace(/^hook_/, ''); } while (f !== prev);
-        return f;
-    };
-    const originalVideoUrl = getApiUrl((clip.video_url || '').replace(/[^/]+$/, stripBurns((clip.video_url || '').split('/').pop())));
+    // Pristine base clip (no burned subtitles/hook): lib/cleanClipUrl.js.
+    const originalVideoUrl = getApiUrl(cleanClipPath(clip.video_url));
     const [currentVideoUrl, setCurrentVideoUrl] = useState(getApiUrl(clip.video_url));
     // Where the <video> element pulls its bytes from. The clips are archived to
     // R2 anyway, and R2 egress is free and edge-served, while /videos is served
