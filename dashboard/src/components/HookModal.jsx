@@ -28,11 +28,13 @@ const FONT_OPTIONS = [
     { value: 'montserrat', label: 'Montserrat' },
     { value: 'anton', label: 'Anton' },
     { value: 'serif', label: 'Serif' },
+    { value: 'tiktok', label: 'TikTok Sans' },
 ];
 const FONT_CSS = {
     montserrat: { fontFamily: "'Montserrat-ExtraBold', 'Montserrat', sans-serif", fontWeight: 800 },
     anton: { fontFamily: "'Anton-Regular', Impact, sans-serif", fontWeight: 400 },
     serif: { fontFamily: "'Noto Serif', Georgia, serif", fontWeight: 700 },
+    tiktok: { fontFamily: "'TikTokSans-Static', 'TikTok Sans', sans-serif", fontWeight: 700 },
 };
 // The style's own typeface when none is picked (what hooks.py renders).
 const styleFont = (st) => (st === 'pill' ? 'montserrat' : 'serif');
@@ -119,7 +121,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     };
 
     const pillFontFace = "@font-face{font-family:'Montserrat-ExtraBold';src:url('/fonts/Montserrat-ExtraBold.ttf') format('truetype');font-weight:800;}"
-        + "@font-face{font-family:'Anton-Regular';src:url('/fonts/Anton-Regular.ttf') format('truetype');font-weight:400;}";
+        + "@font-face{font-family:'Anton-Regular';src:url('/fonts/Anton-Regular.ttf') format('truetype');font-weight:400;}"
+        + "@font-face{font-family:'TikTokSans-Static';src:url('/fonts/TikTokSans-Bold.ttf') format('truetype');font-weight:700;}";
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg" eyebrow="EDITOR · HOOK" title="edit hook">
@@ -211,7 +214,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                         {/* Typeface */}
                         <div>
                             <p className="eyebrow mb-2">Font</p>
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="grid grid-cols-2 gap-1.5">
                                 {FONT_OPTIONS.map((f) => (
                                     <button
                                         key={f.value}

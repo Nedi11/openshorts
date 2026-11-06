@@ -7,6 +7,7 @@ import {
 import { getApiUrl, withParam } from '../config';
 import { apiFetch, apiJson, QuotaError, openQuotaWall } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { RenderQueueSlot } from './RenderQueue';
 import { censorSections, setSkip, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEPS } from '../lib/censorSections';
 
 // Full-screen clip editor: shows WHICH source segments a clip was cut from,
@@ -1177,6 +1178,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     </p>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                    <RenderQueueSlot />
                     <div className="text-right hidden sm:block">
                         <p className="readout">DURATION · {fmt(total)}</p>
                         <p className="readout mt-1">

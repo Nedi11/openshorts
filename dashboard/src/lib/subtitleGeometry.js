@@ -3,7 +3,9 @@
 export const ASS_SCALE = 1920 / 288;
 const RATIOS = {Anton: 2048/3550, Impact: 2048/3550,
   'Montserrat ExtraBold': 1000/1562, Georgia: 2048/2268,
-  'Courier New': 2048/2320};
+  'Courier New': 2048/2320,
+  // TikTok Sans static instances: unitsPerEm / (winAscent + winDescent).
+  'TikTok Sans': 1000/1360};
 export function subtitleFontPixels(size, font) {
   const assSize = Math.trunc(Math.min(200, Math.max(6, size)) * .85);
   return assSize * ASS_SCALE * (RATIOS[font] ?? 2048/2288);

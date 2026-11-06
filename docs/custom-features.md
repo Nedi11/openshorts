@@ -233,3 +233,22 @@ onnx weekly prerelease is pinned. Saved as music_removal.quality and
 re-applied on reframe. Implementation: music_removal.py, app.py, ClipEditor.jsx,
 Dockerfile, requirements.txt. Tests: tests/custom/test_music_removal.py,
 tests/test_rerender_endpoint.py.
+
+FONT-001 (implemented): TikTok Sans for captions (Regular and Bold, so the Bold
+toggle works) and hooks (Bold, size factor 0.07; 0.0755 would match
+Montserrat's width but makes the letters noticeably taller). Upstream ships
+only a variable font, so static 400/700 instances (opsz 36, wdth 100, slnt 0)
+were made with fontTools. OFL 1.1 with no Reserved Font Name, licence bundled
+as fonts/TikTokSans-OFL.txt. The same files back libass (fonts/, registered with
+fontconfig), the hook renderer, and the browser preview (dashboard/public/fonts).
+Preview sizing uses its winAscent/winDescent ratio (1000/1360). Tests:
+tests/custom/test_tiktok_sans.py (libass picks TikTok Sans over a fallback;
+Bold vs Regular; hook render), dashboard/tests/subtitleGeometry.test.cjs.
+
+EDIT-005 (implemented): the render queue is a compact button inside the top
+bar, not a panel floating over the page. It covered header controls such as
+the profile selector's dropdown. The queue shows in the most recently mounted
+RenderQueueSlot: the clip editor's header while it is open, else the app
+header. Its list opens as a dropdown on click and closes on an outside click or
+Escape. There is still one queue instance, so polling and cancel state are
+shared. Tests: dashboard/tests/renderQueue.test.cjs.
