@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
-import { ASS_SCALE, subtitleFontPixels, subtitleOutline } from '../lib/subtitleGeometry';
+import { ASS_SCALE, subtitleFontPixels, subtitleOutline, CAPTION_PRESET_Y, customCaptionBottom } from '../lib/subtitleGeometry';
 import SegmentedControl from './ui/SegmentedControl';
 
 const FONT_OPTIONS = [
@@ -72,6 +72,7 @@ const POSITION_OPTIONS = [
     { value: 'top', label: 'top' },
     { value: 'middle', label: 'middle' },
     { value: 'bottom', label: 'bottom' },
+    { value: 'custom', label: 'custom' },
 ];
 
 // Ready-made caption looks burned server-side as karaoke ASS (word highlight):
@@ -136,6 +137,19 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [bold, setBold] = useState(true);
     const [highlightEnabled, setHighlightEnabled] = useState(true);
     const [shadow, setShadow] = useState(0);
+    const [shadowAngle, setShadowAngle] = useState(45);
+    const [shadowBlur, setShadowBlur] = useState(0);
+    const [shadowColor, setShadowColor] = useState('#000000');
+    const [shadowOpacity, setShadowOpacity] = useState(0.55);
+    // position 'custom': caption bottom edge, % of the height above the bottom.
+    const [positionY, setPositionY] = useState(CAPTION_PRESET_Y.bottom);
+    const choosePosition = (value) => {
+        // Start the custom slider where the preset in use already sits.
+        if (value === 'custom' && position !== 'custom') {
+            setPositionY(Math.round(CAPTION_PRESET_Y[position] ?? CAPTION_PRESET_Y.bottom));
+        }
+        setPosition(value);
+    };
     const [horizontalPadding, setHorizontalPadding] = useState(6.17);
     const [oneWord, setOneWord] = useState(false);
     const [activePreset, setActivePreset] = useState('default');
@@ -160,6 +174,10 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setBgOpacity(0);
         setReveal(!!p.reveal);
         setShadow(p.shadow || 0);
+        setShadowAngle(45);
+        setShadowBlur(0);
+        setShadowColor('#000000');
+        setShadowOpacity(0.55);
         setHighlightEnabled(true);
         setBold(true);
         setOneWord(!!p.oneWord);
@@ -213,6 +231,11 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                     setUppercase(saved.uppercase ?? true);
                     setReveal(!!saved.reveal);
                     setShadow(saved.shadow ?? 0);
+                    setShadowAngle(saved.shadow_angle ?? 45);
+                    setShadowBlur(saved.shadow_blur ?? 0);
+                    setShadowColor(saved.shadow_color || '#000000');
+                    setShadowOpacity(saved.shadow_opacity ?? 0.55);
+                    if (saved.position_y != null) setPositionY(saved.position_y);
                     setBold(saved.bold ?? true);
                     setHighlightEnabled(saved.highlight_enabled ?? true);
                     setHorizontalPadding(saved.horizontal_padding ?? 6.17);
@@ -265,6 +288,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const subtitleConfig = {
         captions,
         position,
+        positionY,
         maxChars,
         horizontalPadding,
         maxDurationMs: maxDuration * 1000,
@@ -284,6 +308,10 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
             uppercase: style === 'karaoke' ? uppercase : false,
             reveal: style === 'karaoke' && reveal,
             shadow: style === 'karaoke' ? shadow : 0,
+            shadowAngle,
+            shadowBlur: style === 'karaoke' ? shadowBlur : 0,
+            shadowColor,
+            shadowOpacity,
             // Text on the active-word box: black on a light box, as burned.
             highlightTextColor: luminance(highlightColor) > 0.6 ? '#000000' : fontColor,
         },
@@ -316,7 +344,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         <Modal isOpen={isOpen} onClose={onClose} size="xl" eyebrow="EDITOR · SUBTITLES" title="subtitles">
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
-                <div className="flex-1 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16] max-h-[600px]">
+                {/* Sticky on desktop: the controls scroll past a preview that stays in view. */}
+                <div className="w-full max-w-[338px] mx-auto md:mx-0 md:w-[338px] shrink-0 self-start md:sticky md:top-0 z-10 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16]">
                     {captionsLoading ? (
                         <div className="flex items-center gap-2 text-muted">
                             <Loader2 size={16} className="animate-spin" />
@@ -336,7 +365,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 ${position === 'top' ? 'top-20' : ''}
                                 ${position === 'middle' ? 'top-0 bottom-0' : ''}
                                 ${position === 'bottom' ? 'bottom-20' : ''}
-                            `}>
+                            `} style={position === 'custom' ? { bottom: `${customCaptionBottom(positionY)}%` } : undefined}>
                                 <span style={fallbackPreviewStyle}>
                                     This is how your subtitles<br/>will appear on the video
                                 </span>
@@ -346,8 +375,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                 </div>
 
                 {/* Right: Controls */}
-                <div className="w-full md:w-80 flex flex-col">
-                    <div className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                <div className="w-full md:flex-1 md:min-w-0 flex flex-col">
+                    <div className="space-y-5 flex-1 pr-1">
                         {/* Caption presets (server-side karaoke burn) */}
                         <div>
                             <p className="eyebrow mb-2">Preset</p>
@@ -400,17 +429,47 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <SegmentedControl
                                 options={POSITION_OPTIONS}
                                 value={position}
-                                onChange={setPosition}
+                                onChange={choosePosition}
                                 size="sm"
                             />
+                            {position === 'custom' && (
+                                <label className="block readout mt-2">Height above bottom: {positionY}%
+                                    <input aria-label="Caption height above bottom" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="90" step="0.5" value={positionY} onChange={e => setPositionY(Number(e.target.value))} />
+                                </label>
+                            )}
                         </div>
 
                         <label className="block readout">Horizontal padding: {Math.round(horizontalPadding)}% per side
                             <input aria-label="Horizontal padding" className="w-full" type="range" min="0" max="35" step="1" value={horizontalPadding} onChange={e => { setHorizontalPadding(Number(e.target.value)); setSavedLineBudget(null); }} />
                         </label>
-                        <label className="block readout">Shadow (without stroke): {shadow}
-                            <input aria-label="Caption shadow" className="w-full" type="range" min="0" max="6" value={shadow} onChange={e => setShadow(Number(e.target.value))} />
-                        </label>
+                        {/* Shadow: its own layer under the text, so blur never softens the letters. */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <p className="eyebrow">Shadow</p>
+                                <label className="relative w-6 h-6 rounded-input border border-rule2 cursor-pointer overflow-hidden shrink-0" title="Shadow color">
+                                    <div className="w-full h-full" style={{ backgroundColor: shadowColor }} />
+                                    <input aria-label="Shadow color" type="color" value={shadowColor} onChange={(e) => setShadowColor(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                </label>
+                            </div>
+                            {borderWidth > 0 && (
+                                <p className="text-[11px] text-muted leading-relaxed">Set Border to none to show the shadow.</p>
+                            )}
+                            {style !== 'karaoke' && (
+                                <p className="text-[11px] text-muted leading-relaxed">Shadow applies to the karaoke presets.</p>
+                            )}
+                            <label className="block readout">Distance: {shadow}
+                                <input aria-label="Caption shadow" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="10" step="0.5" value={shadow} onChange={e => setShadow(Number(e.target.value))} />
+                            </label>
+                            <label className="block readout">Direction: {shadowAngle}° <span aria-hidden="true" className="inline-block" style={{ transform: `rotate(${shadowAngle}deg)` }}>→</span>
+                                <input aria-label="Shadow direction" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="360" step="5" value={shadowAngle} onChange={e => setShadowAngle(Number(e.target.value))} />
+                            </label>
+                            <label className="block readout">Blur: {shadowBlur}
+                                <input aria-label="Shadow blur" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="10" step="0.5" value={shadowBlur} onChange={e => setShadowBlur(Number(e.target.value))} />
+                            </label>
+                            <label className="block readout">Opacity: {Math.round(shadowOpacity * 100)}%
+                                <input aria-label="Shadow opacity" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="100" step="5" value={Math.round(shadowOpacity * 100)} onChange={e => setShadowOpacity(Number(e.target.value) / 100)} />
+                            </label>
+                        </div>
                         {/* Size */}
                         <div>
                             <p className="eyebrow mb-2">Size: {fontSize}</p>
@@ -607,6 +666,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 // Karaoke burn (server-side ASS render)
                                 style, effect, baseOpacity, uppercase, highlightColor, bold, highlightEnabled,
                                 reveal: !oneWord && reveal, shadow, horizontalPadding, maxChars, maxDuration,
+                                shadowAngle, shadowBlur, shadowColor, shadowOpacity, positionY,
                                 // Remotion data
                                 remotion: useRemotionPreview ? subtitleConfig : null,
                                 captions: textEdited ? captions : null,

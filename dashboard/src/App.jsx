@@ -637,6 +637,11 @@ function App() {
             uppercase: options.uppercase || false,
             reveal: options.reveal || false,
             shadow: options.shadow || 0,
+            shadow_angle: options.shadowAngle ?? 45,
+            shadow_blur: options.shadowBlur ?? 0,
+            shadow_color: options.shadowColor || '#000000',
+            shadow_opacity: options.shadowOpacity ?? 0.55,
+            position_y: options.position === 'custom' ? options.positionY : null,
             max_chars: options.maxChars ?? null,
             max_duration: options.maxDuration ?? null,
             // Chain from the clip's current server file (its video_url basename).

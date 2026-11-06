@@ -96,6 +96,38 @@ recut.py, ClipEditor.jsx; tests/custom/test_word_censor.py verifies actual encod
 audio frequency suppression, duration, exact matching and caption time remapping;
 tests/test_rerender_endpoint.py covers saved recipe and hook preservation.
 
+CAPTION-006 (implemented): caption shadow has distance (0–10), direction
+(0–360°, 0 right, 90 down; 45° reproduces the earlier equal x/y offset), blur
+(0–10), colour and opacity. ASS burns draw the shadow on a separate layer under
+the text (nearly transparent fill, libass \xshad/\yshad/\blur), so blur never
+softens the letters; zero distance with blur gives a centred soft halo. A stroke
+still suppresses the shadow (CAPTION-004); shadow applies to karaoke captions.
+Settings save with the caption style and reapply on hook, recut and restyle.
+Implementation: subtitles.py shadow_layer_tags, app.py, SubtitleModal.jsx,
+subtitleGeometry.js subtitleShadowCss, remotion/compositions/Subtitles.tsx.
+Tests: tests/custom/test_shadow_position.py (tag maths plus a real libass frame
+proving a blurred offset shadow under unchanged white glyph pixels),
+tests/test_hook_caption_persistence.py, dashboard/tests/subtitleGeometry.test.cjs.
+
+CAPTION-007 (implemented): besides top/middle/bottom, captions offer a custom
+position: the caption's bottom edge as 0–90% of the height above the bottom.
+ASS and Classic burns use bottom alignment with MarginV = 288 × percentage;
+the preview uses the same rounding. Split-layout seam captions keep their \an5
+override. Implementation: subtitles.py custom_margin_v, app.py, SubtitleModal.jsx,
+Subtitles.tsx. Tests: tests/custom/test_shadow_position.py.
+
+HOOK-001 (implemented): besides auto/top/center/bottom, hooks offer custom
+left/right and up/down sliders, each 0–100% of the box's free travel, so the
+whole hook always stays in frame. Server (hooks.custom_overlay_xy) and preview
+and browser export (HookOverlay.tsx flex spacers) share that definition. The
+choice saves in auto_hook and reapplies on recut/reframe. Tests:
+tests/custom/test_shadow_position.py, tests/test_hook_caption_persistence.py.
+Manual acceptance: real 1080x1920 clip burned with a custom-position pill hook,
+custom-height karaoke captions and a blurred 120° shadow in one encode.
+
+EDIT-004 (implemented): in the hook and caption editors the preview is sticky on
+desktop widths, so scrolling the controls no longer scrolls the video away.
+Phones keep the stacked layout. Implementation: HookModal.jsx, SubtitleModal.jsx.
 PERF-001 (implemented): main.py sets OMP_NUM_THREADS (TORCH_THREADS, else up to
 8) before importing ultralytics, which otherwise forces it to 1 for the whole
 job process. That had left TransNetV2 scene detection, YOLO and faster-whisper

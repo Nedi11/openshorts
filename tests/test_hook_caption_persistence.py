@@ -156,3 +156,31 @@ def test_failed_combined_encode_keeps_the_previous_clip(clip, monkeypatch):
     assert response.status_code == 500
     assert path.read_text() == before
     assert api.jobs[JOB]['result']['clips'][0]['video_url'] == previous_url
+
+
+# CAPTION-006 / HOOK-001: fine shadow and custom placement persist and reapply.
+def test_new_caption_and_hook_settings_are_saved_and_reused(clip, monkeypatch):
+    path, burns = clip
+    style = {'shadow': 2.5, 'shadow_angle': 135, 'shadow_blur': 3, 'shadow_color': '#112233',
+             'shadow_opacity': .8, 'position': 'custom', 'position_y': 33}
+    response = request('POST', '/api/subtitle', {'job_id': JOB, 'clip_index': 0, 'style': 'karaoke', **style})
+    assert response.status_code == 200, response.text
+    saved = json.loads(path.read_text())['shorts'][0]['caption_style']
+    assert {k: saved[k] for k in style} == style
+    seen = []
+    def hook(video, text, out, **kw):
+        seen.append(kw)
+        Path(out).write_bytes(b'h')
+        if kw.get('also'):
+            Path(kw['also'][1]).write_bytes(b'c')
+    monkeypatch.setattr(api, 'add_hook_to_video', hook)
+    response = request('POST', '/api/hook', {'job_id': JOB, 'clip_index': 0, 'text': 'Hi',
+                                             'position': 'custom', 'position_x': 12, 'position_y': 80})
+    assert response.status_code == 200, response.text
+    assert (seen[-1]['position_x'], seen[-1]['position_y']) == (12, 80)
+    clip_meta = json.loads(path.read_text())['shorts'][0]
+    assert (clip_meta['auto_hook']['position_x'], clip_meta['auto_hook']['position_y']) == (12, 80)
+    # Rerenders (recut / reframe) put the hook back at the same custom spot.
+    api._recut_hook(clip_meta)(str(path.parent / 'base_clip_1.mp4'))
+    assert seen[-1]['position'] == 'custom' and (seen[-1]['position_x'], seen[-1]['position_y']) == (12, 80)
+    assert request('POST', '/api/subtitle', {'job_id': JOB, 'clip_index': 0, 'shadow_blur': 11}).status_code == 422
