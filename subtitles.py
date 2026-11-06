@@ -812,3 +812,43 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
 
     return True
 
+
+
+def write_caption_file(sub_path, transcript, start, end, s, split_ranges=None, video_size=None):
+    """Write the caption file for a normalized caption style ``s`` (the
+    /api/subtitle field names, app.CAPTION_STYLE_FIELDS): karaoke ASS, else
+    classic SRT. Shared by the API and the pipeline's default captions.
+    Returns False when no words fall in range."""
+    max_chars = (max(1, min(40, int(s["max_chars"])))
+                 if s.get("max_chars") is not None else None)
+    max_duration = (max(0.5, min(5.0, float(s["max_duration"])))
+                    if s.get("max_duration") is not None else None)
+    if s["style"] != "karaoke":
+        return generate_srt(transcript, start, end, sub_path, max_chars or 20, max_duration or 2.0)
+    opts = dict(
+        split_ranges=split_ranges,
+        alignment=s["position"], fontsize=s["font_size"],
+        font_name=s["font_name"], font_color=s["font_color"],
+        border_color=s["border_color"], border_width=s["border_width"],
+        highlight_color=s["highlight_color"], bg_color=s["bg_color"],
+        bg_opacity=s["bg_opacity"], effect=s["effect"],
+        base_opacity=s["base_opacity"], uppercase=s["uppercase"],
+        reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"],
+        bold=s["bold"], highlight_enabled=s["highlight_enabled"],
+        position_y=s["position_y"], shadow_angle=s["shadow_angle"], shadow_blur=s["shadow_blur"],
+        shadow_color=s["shadow_color"], shadow_opacity=s["shadow_opacity"], video_size=video_size)
+    if max_chars is not None:
+        opts["max_chars"] = max_chars
+    if max_duration is not None:
+        opts["max_duration"] = max_duration
+    return generate_ass(transcript, start, end, sub_path, **opts)
+
+
+def filter_kwargs(s, video_size=None):
+    """subtitles_filter / burn_subtitles arguments for a normalized style."""
+    return dict(alignment=s["position"], fontsize=s["font_size"], font_name=s["font_name"],
+                font_color=s["font_color"], border_color=s["border_color"],
+                border_width=s["border_width"], bg_color=s["bg_color"], bg_opacity=s["bg_opacity"],
+                horizontal_padding=s["horizontal_padding"], bold=s["bold"],
+                position_y=s["position_y"],
+                **({"video_size": video_size} if video_size is not None else {}))

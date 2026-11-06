@@ -259,3 +259,21 @@ replacement STRING, which reads "$$" as "$" (also "$&", "$1"). A clip titled
 "...MORE $$ THAN ROLEX" pointed at a file that does not exist, so the preview
 showed the hook text without the video. lib/cleanClipUrl.js passes the name
 through a function. Tests: dashboard/tests/cleanClipUrl.test.cjs.
+
+STYLE-001 (implemented): Settings › "Default captions & hook" saves the caption
+style and hook look new videos get (self-host only; one set per install in
+output/.user-defaults.json, on the output volume). Each part can be edited in
+the normal caption or hook editor in defaults mode, with sample words or text
+on a neutral backdrop, or saved from a clip's editor ("save these settings as
+default for new videos"), and reset to the built-in look. GET/PUT /api/defaults
+validate against SubtitleRequest/HookRequest, so a default holds only what an
+editor could apply. The pipeline burns the saved caption style instead of
+AUTO_CAPTION_STYLE and records it on the clip (caption_style), so later edits
+keep that clip's look even if the default changes. Hooks take the saved font,
+position (including custom x/y), size and duration; the upload form's style
+picker starts from the saved hook style and still wins for that one video. The
+hook editor opens with the saved hook. A damaged defaults file falls back to
+the built-in look and never stops a job. Not applied to clips already made.
+Implementation: user_defaults.py, app.py, main.py, subtitles.write_caption_file,
+DefaultStylesCard.jsx, SubtitleModal.jsx, HookModal.jsx, MediaInput.jsx,
+lib/userDefaults.js, lib/captionFields.js. Tests: tests/custom/test_user_defaults.py.

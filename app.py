@@ -1235,30 +1235,7 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
     ``video_size`` is the frame the captions go on (subtitles.play_res_x)."""
     s = {k: SubtitleRequest.model_fields[k].default for k in CAPTION_STYLE_FIELDS}
     s.update({k: v for k, v in (style or {}).items() if k in s})
-    max_chars = (max(1, min(40, int(s["max_chars"])))
-                 if s["max_chars"] is not None else None)
-    max_duration = (max(0.5, min(5.0, float(s["max_duration"])))
-                    if s["max_duration"] is not None else None)
-    if s["style"] == "karaoke":
-        opts = dict(
-            split_ranges=split_ranges,
-            alignment=s["position"], fontsize=s["font_size"],
-            font_name=s["font_name"], font_color=s["font_color"],
-            border_color=s["border_color"], border_width=s["border_width"],
-            highlight_color=s["highlight_color"], bg_color=s["bg_color"],
-            bg_opacity=s["bg_opacity"], effect=s["effect"],
-            base_opacity=s["base_opacity"], uppercase=s["uppercase"],
-            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"],
-            position_y=s["position_y"], shadow_angle=s["shadow_angle"], shadow_blur=s["shadow_blur"],
-            shadow_color=s["shadow_color"], shadow_opacity=s["shadow_opacity"], video_size=video_size)
-        if max_chars is not None:
-            opts["max_chars"] = max_chars
-        if max_duration is not None:
-            opts["max_duration"] = max_duration
-        ok = generate_ass(transcript, start, end, sub_path, **opts)
-    else:
-        ok = generate_srt(transcript, start, end, sub_path,
-                          max_chars or 20, max_duration or 2.0)
+    ok = write_caption_file(sub_path, transcript, start, end, s, split_ranges, video_size)
     if not ok:
         return None
     return s
@@ -4523,7 +4500,8 @@ async def _ensure_job_files(job_id: str, request: Request) -> bool:
 
 from editor import VideoEditor
 from subtitles import generate_srt, generate_ass, burn_subtitles, generate_srt_from_video, CAPTION_PRESETS
-from subtitles import _video_size as _subtitle_video_size
+from subtitles import _video_size as _subtitle_video_size, write_caption_file
+import user_defaults
 from hooks import add_hook_to_video
 from translate import translate_video, get_supported_languages
 from thumbnail import (analyze_video_for_titles, refine_titles, generate_thumbnail,
@@ -6094,6 +6072,80 @@ class HookRequest(BaseModel):
     style: Optional[str] = "pill"  # pill/classic/dark/yellow/red/outline/outline_yellow
     font: Optional[str] = None  # montserrat/anton/serif/tiktok (hooks.HOOK_FONTS); None = the style's own
     remove: Optional[bool] = False  # strip the burned hook instead of adding one
+
+class DefaultsUpdate(BaseModel):
+    # None resets that part to the built-in look (STYLE-001, user_defaults.py).
+    caption_style: Optional[Dict[str, Any]] = None
+    hook: Optional[Dict[str, Any]] = None
+
+
+_HOOK_POSITIONS = ("auto", "top", "center", "bottom", "custom")
+
+
+def _builtin_defaults():
+    from subtitles import AUTO_CAPTION_STYLE
+    caption = {k: SubtitleRequest.model_fields[k].default for k in CAPTION_STYLE_FIELDS}
+    caption.update({k: v for k, v in AUTO_CAPTION_STYLE.items() if k in caption})
+    caption["position"] = AUTO_CAPTION_STYLE["alignment"]
+    return {"caption_style": caption,
+            "hook": {"style": os.environ.get("AUTO_HOOK_STYLE", "pill"), "font": None,
+                     "position": "auto", "position_x": None, "position_y": None,
+                     "size": "M", "duration_seconds": 5.0}}
+
+
+def _validate_default_caption(style):
+    try:
+        model = SubtitleRequest(job_id="defaults", clip_index=0,
+                                **{k: v for k, v in style.items() if k in CAPTION_STYLE_FIELDS})
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid caption default: {e}")
+    if model.style not in ("karaoke", "classic"):
+        raise HTTPException(status_code=422, detail="Caption style must be karaoke or classic")
+    return {k: getattr(model, k) for k in CAPTION_STYLE_FIELDS}
+
+
+def _validate_default_hook(hook):
+    from hooks import HOOK_STYLES, HOOK_FONTS
+    try:
+        model = HookRequest(job_id="defaults", clip_index=0, text="x",
+                            **{k: v for k, v in hook.items() if k in user_defaults.HOOK_FIELDS})
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid hook default: {e}")
+    if model.style not in HOOK_STYLES:
+        raise HTTPException(status_code=422, detail="Unknown hook style")
+    if model.font is not None and model.font not in HOOK_FONTS:
+        raise HTTPException(status_code=422, detail="Unknown hook font")
+    if model.position not in _HOOK_POSITIONS:
+        raise HTTPException(status_code=422, detail="Unknown hook position")
+    if model.size not in user_defaults.HOOK_SIZE_SCALE:
+        raise HTTPException(status_code=422, detail="Hook size must be S, M or L")
+    duration = model.duration_seconds if model.duration_seconds is not None else 5.0
+    if not 1 <= duration <= 60:
+        raise HTTPException(status_code=422, detail="Hook duration must be 1-60 seconds")
+    return {"style": model.style, "font": model.font, "position": model.position,
+            "position_x": model.position_x, "position_y": model.position_y,
+            "size": model.size, "duration_seconds": duration}
+
+
+@app.get("/api/defaults")
+async def get_defaults():
+    """The caption style and hook new videos get, plus the built-in look."""
+    if BILLING_ENABLED:
+        raise HTTPException(status_code=404, detail="Not available")
+    saved = user_defaults.load()
+    return {**saved, "builtin": _builtin_defaults()}
+
+
+@app.put("/api/defaults")
+async def put_defaults(req: DefaultsUpdate):
+    """Save both parts at once; send null for a part to restore its built-in look."""
+    if BILLING_ENABLED:
+        raise HTTPException(status_code=404, detail="Not available")
+    caption = _validate_default_caption(req.caption_style) if req.caption_style else None
+    hook = _validate_default_hook(req.hook) if req.hook else None
+    await asyncio.to_thread(user_defaults.save, caption, hook)
+    return {"caption_style": caption, "hook": hook, "builtin": _builtin_defaults()}
+
 
 @app.post("/api/hook")
 @_edit_render_queue.track("Apply hook")

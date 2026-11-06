@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
 import { HOOK_PRESET_Y } from '../lib/subtitleGeometry';
+import { fetchDefaults, saveDefaults } from '../lib/userDefaults';
 
 const ENTRANCE_OPTIONS = [
     { value: 'spring', label: 'Bounce' },
@@ -61,7 +62,7 @@ function loadHookPrefs() {
     try { return JSON.parse(localStorage.getItem('os_hook_prefs')) || {}; } catch { return {}; }
 }
 
-export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isProcessing, videoUrl, initialText, durationInSeconds, existingSubtitles, hasCaptions, serverRender, burnedHook }) {
+export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isProcessing, videoUrl, initialText, durationInSeconds, existingSubtitles, hasCaptions, serverRender, burnedHook, defaultsMode = false }) {
     const prefs = loadHookPrefs();
     const [text, setText] = useState(initialText || 'POV: You are using the viral hook feature');
     // Stored as `pos`, not `position`: before 'auto' existed every save wrote
@@ -84,8 +85,44 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     const effectiveFont = font || styleFont(style);
     const [entranceAnimation, setEntranceAnimation] = useState(prefs.entranceAnimation || 'spring');
     const [displayDuration, setDisplayDuration] = useState(5);
+    const [defaultsStatus, setDefaultsStatus] = useState('');
+
+    // A saved default hook (STYLE-001) is where every hook edit starts; with
+    // none, the last-used settings above stay.
+    useEffect(() => {
+        if (!isOpen) return undefined;
+        let cancelled = false;
+        setDefaultsStatus('');
+        fetchDefaults().then((d) => {
+            const h = d.hook || (defaultsMode ? d.builtin.hook : null);
+            if (cancelled || !h) return;
+            setStyle(h.style || 'pill');
+            setFont(h.font || null);
+            setPosition(h.position || 'auto');
+            if (h.position_x != null) setPositionX(h.position_x);
+            if (h.position_y != null) setPositionY(h.position_y);
+            setSize(h.size || 'M');
+            if (h.duration_seconds) setDisplayDuration(Math.round(h.duration_seconds));
+        }).catch(() => { /* keep the last-used settings */ });
+        return () => { cancelled = true; };
+    }, [isOpen, defaultsMode]);
 
     if (!isOpen) return null;
+
+    const saveAsDefault = async () => {
+        setDefaultsStatus('saving…');
+        try {
+            await saveDefaults({ hook: {
+                style, font, position, size, duration_seconds: displayDuration,
+                position_x: position === 'custom' ? positionX : null,
+                position_y: position === 'custom' ? positionY : null,
+            } });
+            setDefaultsStatus('Saved: new videos get this hook look.');
+            if (defaultsMode) onClose();
+        } catch (e) {
+            setDefaultsStatus(e.message);
+        }
+    };
 
     // Build hook config for Remotion preview
     const hookConfig = {
@@ -100,7 +137,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         displayDurationSec: displayDuration,
     };
 
-    const useRemotionPreview = !!videoUrl;
+    // Defaults mode has no clip: the preview draws a neutral backdrop instead.
+    const useRemotionPreview = !!videoUrl || defaultsMode;
 
     // Fallback preview logic (same as original)
     const getPositionClass = () => {
@@ -125,7 +163,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         + "@font-face{font-family:'TikTokSans-Static';src:url('/fonts/TikTokSans-Bold.ttf') format('truetype');font-weight:700;}";
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} size="lg" eyebrow="EDITOR · HOOK" title="edit hook">
+        <Modal isOpen={isOpen} onClose={onClose} size="lg" eyebrow={defaultsMode ? 'SETTINGS · DEFAULT HOOK' : 'EDITOR · HOOK'} title={defaultsMode ? 'default hook for new videos' : 'edit hook'}>
             <style>{pillFontFace}</style>
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
@@ -167,7 +205,10 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                     <div className="space-y-5 flex-1 pr-1">
                         {/* Text Input */}
                         <div>
-                            <p className="eyebrow mb-2">Text</p>
+                            <p className="eyebrow mb-2">{defaultsMode ? 'Sample text' : 'Text'}</p>
+                            {defaultsMode && (
+                                <p className="text-[11px] text-muted mb-2 leading-relaxed">Only for the preview: every new clip gets its own AI-written hook text.</p>
+                            )}
                             <textarea
                                 value={text}
                                 onChange={(e) => setText(e.target.value)}
@@ -331,6 +372,12 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                         </div>
                     </div>
 
+                    {defaultsMode ? (
+                    <div className="flex gap-2 mt-5 shrink-0">
+                        <button onClick={onClose} className="btn-ghost">cancel</button>
+                        <button onClick={saveAsDefault} className="btn-primary flex-1">save as default</button>
+                    </div>
+                    ) : (
                     <div className="flex gap-2 mt-5 shrink-0">
                         <button onClick={onClose} className="btn-ghost">
                             cancel
@@ -355,6 +402,14 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             {isProcessing ? 'saving...' : (burnedHook ? 'update hook' : 'add hook')}
                         </button>
                     </div>
+                    )}
+                    {defaultsStatus && <p role="status" className="text-xs text-muted mt-2">{defaultsStatus}</p>}
+                    {!defaultsMode && (
+                        <button type="button" onClick={saveAsDefault}
+                            className="mt-2 text-xs text-muted underline underline-offset-2 lowercase hover:text-ink2 self-start">
+                            save these settings as default for new videos
+                        </button>
+                    )}
                 </div>
             </div>
         </Modal>

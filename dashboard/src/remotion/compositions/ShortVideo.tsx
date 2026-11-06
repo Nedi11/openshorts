@@ -16,12 +16,18 @@ export const ShortVideo: React.FC<Record<string, unknown>> = (rawProps) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* Layer 1: Base video with optional zoom/color effects */}
-      <VideoEffects config={effects}>
-        <Video
-          src={videoUrl}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </VideoEffects>
+      {videoUrl ? (
+        <VideoEffects config={effects}>
+          <Video
+            src={videoUrl}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        </VideoEffects>
+      ) : (
+        // No clip (the default-style editors in Settings): a neutral backdrop
+        // that shows outlines and shadows the way footage would.
+        <AbsoluteFill style={{ background: "linear-gradient(160deg, #6b7686 0%, #3a3f48 55%, #23262c 100%)" }} />
+      )}
 
       {/* Layer 2: Animated subtitles */}
       {subtitles && <Subtitles config={subtitles} />}
