@@ -174,3 +174,14 @@ Dockerfile, requirements.txt. Tests: tests/custom/test_music_removal.py,
 tests/test_rerender_endpoint.py. Manual acceptance: a 60 s section of a real
 video separated into a voice track (223 transcribed words, level unchanged) and
 a residual about 13 dB lower containing no transcribable speech.
+
+AUDIO-001 controls fix (implemented): each listed word shows the section it
+actually removes (clip start–end). Start/End move one edge and Move shifts the
+whole section, 0.05 s per click. Per-word adjustments are effectively
+unlimited (the section clamps to the segment holding the word). Shrinking
+below 0.1 s is refused, widening never is, and each word has a reset. The
+general lead/tail and a word's own adjustment add together, so changing the
+general setting keeps every per-word offset. Edges that cross are flagged,
+block rendering in the editor, and are refused by the server (400): before,
+such a word was silently left uncensored. Tests: tests/custom/test_word_censor.py,
+dashboard/tests/censorSections.test.cjs (the reported crossed case).

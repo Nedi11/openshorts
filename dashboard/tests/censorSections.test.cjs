@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const result = buildSync({entryPoints:[require('node:path').join(__dirname,'../src/lib/censorSections.js')],bundle:true,write:false,format:'cjs'});
 const sandbox = {module:{exports:{}}};
 vm.runInNewContext(result.outputFiles[0].text, sandbox);
-const {censorSections, adjust, normalizeWord, parseWords} = sandbox.module.exports;
+const {censorSections, adjust, moveEdge, resetWord, normalizeWord, parseWords} = sandbox.module.exports;
 
 // Objects come from the vm sandbox's realm, so compare as JSON.
 const same = (a, b) => assert.equal(JSON.stringify(a), JSON.stringify(b));
@@ -40,4 +40,42 @@ test('word normalisation matches word_censor.normalize', () => {
   assert.equal(normalizeWord("'Scheiße!'"), 'scheiße');
   assert.equal(normalizeWord("Don't,"), "don't");
   same(parseWords(' fuck, ,shit '), ['fuck', 'shit']);
+});
+
+test('the reported crossed case is flagged, and reset or widening repairs it', () => {
+  // "fuck" 238.08-238.20, lead 0.5, start 1.0 s later, end 0.85 s earlier.
+  const word = [{w:'fuck', s:238.08, e:238.2}];
+  const seg = [{start:157.74, end:239.369}];
+  const broken = {'238.080': {before:-1, after:-0.85, skip:false}};
+  const [sec] = censorSections(word, ['fuck'], seg, 0.5, 0.05, broken);
+  assert.equal(sec.crossed, true);
+  // Shrinking further is refused; widening is allowed.
+  assert.equal(moveEdge(broken, sec, 'start', 0.05), null);
+  assert.notEqual(moveEdge(broken, sec, 'start', -0.05), null);
+  const [fixed] = censorSections(word, ['fuck'], seg, 0.5, 0.05, resetWord(broken, '238.080'));
+  assert.deepEqual([fixed.crossed, fixed.start, fixed.end], [false, 237.58, 238.25]);
+});
+
+test('edge moves stop at the minimum length; move shifts both edges', () => {
+  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});   // 0.5 s long
+  let adj = {};
+  let current = sec;
+  for (let i = 0; i < 20; i++) {
+    const next = moveEdge(adj, current, 'start', 0.05);
+    if (!next) break;
+    adj = next;
+    [current] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj);
+  }
+  assert.ok(current.end - current.start >= 0.1 - 1e-9 && current.end - current.start < 0.15);
+  const [moved] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, moveEdge({}, sec, 'move', 0.05));
+  assert.deepEqual([moved.start, moved.end], [1.05, 1.55]);
+});
+
+test('per-word moves go past one second', () => {
+  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});
+  let adj = {};
+  let cur = sec;
+  for (let i = 0; i < 30; i++) { adj = moveEdge(adj, cur, 'end', 0.05); [cur] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj); }
+  assert.equal(adj['1.000'].after, 1.5);
+  assert.equal(cur.end, 3);   // clamped by the segment, not by a nudge limit
 });
