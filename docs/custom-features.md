@@ -185,3 +185,10 @@ general setting keeps every per-word offset. Edges that cross are flagged,
 block rendering in the editor, and are refused by the server (400): before,
 such a word was silently left uncensored. Tests: tests/custom/test_word_censor.py,
 dashboard/tests/censorSections.test.cjs (the reported crossed case).
+
+AUDIO-001 fine sections (implemented): sections down to 0.01 s are applied
+(word_censor.MIN_SECTION, mirrored in censorSections.js), and the editor's edge
+buttons step by a chosen 0.01 / 0.05 / 0.25 s. Bleep is sample-accurate; Cut
+re-encodes frame-accurately, so the picture moves in whole frames (~0.033 s at
+30 fps) around the cut. Tests: tests/custom/test_word_censor.py,
+dashboard/tests/censorSections.test.cjs (0.07 s section shrunk to 0.02 s).

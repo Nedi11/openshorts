@@ -5,10 +5,11 @@ export const PAD_AFTER = 0.05;
 // Per-word adjustments are effectively unlimited: sections already clamp to the
 // segment holding the word. This only bounds nonsense input (word_censor.MAX_NUDGE).
 export const MAX_NUDGE = 600;
-const MIN_SECTION = 0.04;
+const MIN_SECTION = 0.01;   // word_censor.MIN_SECTION
 // The editor never lets a nudge shrink a section below this.
-export const MIN_EDIT_LENGTH = 0.1;
-export const STEP = 0.05;
+export const MIN_EDIT_LENGTH = 0.01;
+// Click sizes the editor offers for moving an edge.
+export const STEPS = [0.01, 0.05, 0.25];
 
 export function normalizeWord(word) {
     return String(word).toLowerCase().replace(/[^\p{L}\p{N}_']/gu, '').replace(/^'+|'+$/g, '');
