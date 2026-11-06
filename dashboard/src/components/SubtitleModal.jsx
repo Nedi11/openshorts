@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
-import { ASS_SCALE, subtitleFontPixels } from '../lib/subtitleGeometry';
+import { ASS_SCALE, subtitleFontPixels, subtitleOutline } from '../lib/subtitleGeometry';
 import SegmentedControl from './ui/SegmentedControl';
 
 const FONT_OPTIONS = [
@@ -134,6 +134,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [uppercase, setUppercase] = useState(true);
     const [reveal, setReveal] = useState(false);
     const [shadow, setShadow] = useState(0);
+    const [horizontalPadding, setHorizontalPadding] = useState(6.17);
     const [oneWord, setOneWord] = useState(false);
     const [activePreset, setActivePreset] = useState('default');
 
@@ -163,7 +164,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     };
 
     const [savedLineBudget, setSavedLineBudget] = useState(null);
-    const maxChars = savedLineBudget ?? lineBudget(fontName, fontSize, oneWord);
+    const maxChars = savedLineBudget ?? Math.max(1, Math.round(lineBudget(fontName, fontSize, oneWord) * (100 - 2 * horizontalPadding) / 87.66));
     // Same block duration as the auto captions (AUTO_CAPTION_STYLE).
     const [maxDuration, setMaxDuration] = useState(1.4);
 
@@ -208,6 +209,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                     setUppercase(saved.uppercase ?? true);
                     setReveal(!!saved.reveal);
                     setShadow(saved.shadow ?? 0);
+                    setHorizontalPadding(saved.horizontal_padding ?? 6.17);
                     setOneWord(saved.max_chars === 1);
                     setSavedLineBudget(saved.max_chars ?? 20);
                     setMaxDuration(saved.max_duration ?? 2.0);
@@ -258,6 +260,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         captions,
         position,
         maxChars,
+        horizontalPadding,
         maxDurationMs: maxDuration * 1000,
         style: {
             fontFamily: fontName,
@@ -282,19 +285,13 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     // Fallback: static CSS preview (same as original)
     const bw = Math.max(borderWidth, 0);
     const bc = borderColor;
-    const outlineShadow = bw > 0 ? [
-        `-${bw}px -${bw}px 0 ${bc}`, `${bw}px -${bw}px 0 ${bc}`,
-        `-${bw}px ${bw}px 0 ${bc}`, `${bw}px ${bw}px 0 ${bc}`,
-        `0 -${bw}px 0 ${bc}`, `0 ${bw}px 0 ${bc}`,
-        `-${bw}px 0 0 ${bc}`, `${bw}px 0 0 ${bc}`,
-    ].join(', ') : 'none';
 
     const fallbackPreviewStyle = {
         fontFamily: fontName,
         color: fontColor,
         fontSize: '20px',
         fontWeight: 'bold',
-        maxWidth: '85%',
+        maxWidth: `${100 - horizontalPadding * 2}%`,
         padding: '6px 12px',
         borderRadius: '4px',
         textAlign: 'center',
@@ -304,7 +301,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                 backgroundColor: `${bgColor}${Math.round(bgOpacity * 255).toString(16).padStart(2, '0')}`,
                 textShadow: 'none',
             }
-            : { textShadow: outlineShadow }
+            : { ...subtitleOutline(bw, bc), textShadow: 'none' }
         ),
     };
 
@@ -401,9 +398,16 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             />
                         </div>
 
+                        <label className="block readout">Horizontal padding: {Math.round(horizontalPadding)}% per side
+                            <input aria-label="Horizontal padding" className="w-full" type="range" min="0" max="35" step="1" value={horizontalPadding} onChange={e => { setHorizontalPadding(Number(e.target.value)); setSavedLineBudget(null); }} />
+                        </label>
+                        <label className="block readout">Shadow (without stroke): {shadow}
+                            <input aria-label="Caption shadow" className="w-full" type="range" min="0" max="6" value={shadow} onChange={e => setShadow(Number(e.target.value))} />
+                        </label>
                         {/* Size */}
                         <div>
-                            <p className="eyebrow mb-2">Size</p>
+                            <p className="eyebrow mb-2">Size: {fontSize}</p>
+                            <input aria-label="Caption size" className="w-full" type="range" min="6" max="70" step="1" value={fontSize} onChange={e => { setFontSize(Number(e.target.value)); setSavedLineBudget(null); }} />
                             <SegmentedControl
                                 options={SIZE_OPTIONS}
                                 value={fontSize}
@@ -592,7 +596,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 position, fontSize, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
                                 // Karaoke burn (server-side ASS render)
                                 style, effect, baseOpacity, uppercase, highlightColor,
-                                reveal: !oneWord && reveal, shadow, maxChars, maxDuration,
+                                reveal: !oneWord && reveal, shadow, horizontalPadding, maxChars, maxDuration,
                                 // Remotion data
                                 remotion: useRemotionPreview ? subtitleConfig : null,
                                 captions: textEdited ? captions : null,

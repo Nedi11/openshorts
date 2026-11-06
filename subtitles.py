@@ -355,7 +355,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                  highlight_color="#FFD700", bg_color="#000000", bg_opacity=0.0,
                  effect="none", base_opacity=1.0, uppercase=False,
                  margin_v=SAFE_MARGIN_V, split_ranges=None,
-                 reveal=False, shadow=0):
+                 reveal=False, shadow=0, horizontal_padding=6.17):
     """
     Generates a karaoke-style ASS file: each block is shown like the SRT path,
     but the currently spoken word is rendered in highlight_color (modern
@@ -380,9 +380,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         return False
 
     # Match the SRT burn path: PlayResY 288 keeps font sizes consistent.
-    final_fontsize = int(_clamp_number(fontsize, 10, 200, 16) * 0.85)
-    if final_fontsize < 10:
-        final_fontsize = 10
+    final_fontsize = int(_clamp_number(fontsize, 6, 200, 16) * 0.85)
 
     align_map = {'top': 8, 'middle': 5, 'bottom': 2}
     ass_alignment = align_map.get(str(alignment).lower(), 2)
@@ -407,7 +405,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     primary_colour = hex_to_ass_color(_dim_hex_color(font_color, base_opacity), 1.0)
     bg_opacity = _clamp_number(bg_opacity, 0.0, 1.0, 0.0)
     border_width = _clamp_number(border_width, 0, 10, 2)
-    shadow = int(_clamp_number(shadow, 0, 6, 0))
+    shadow = int(_clamp_number(shadow, 0, 6, 0)) if not border_width else 0
+    margin_h = round(162 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)
 
     if bg_opacity > 0:
         border_style = 3
@@ -456,7 +455,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
             f"Style: Active,{safe_font},{final_fontsize},"
             f"{hex_to_ass_color(on_box, 1.0)},{hex_to_ass_color(on_box, 1.0)},"
             f"{box_colour},{box_colour},1,0,0,0,100,100,0,0,3,{pad},0,"
-            f"{ass_alignment},10,10,{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
+            f"{ass_alignment},{margin_h},{margin_h},{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         )
 
     header = (
@@ -473,7 +472,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{safe_font},{final_fontsize},{primary_colour},{primary_colour},"
         f"{outline_colour},{back_colour},1,0,0,0,100,100,0,0,{border_style},"
-        f"{outline_width},{shadow},{ass_alignment},10,10,{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
+        f"{outline_width},{shadow},{ass_alignment},{margin_h},{margin_h},{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         f"{active_style}"
         "\n"
         "[Events]\n"
@@ -574,7 +573,7 @@ def _sanitize_font_name(name):
 def subtitles_filter(srt_path, alignment=2, fontsize=16,
                      font_name="Verdana", font_color="#FFFFFF",
                      border_color="#000000", border_width=2,
-                     bg_color="#000000", bg_opacity=0.0):
+                     bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17):
     """The -vf string burn_subtitles uses (also fed to hooks.add_hook_to_video)."""
     # Position mapping
     ass_alignment = 2
@@ -588,9 +587,7 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
 
     # Font size scaling for ASS virtual resolution (PlayResY=288 default)
     # For vertical 1080x1920 video, we need larger text for readability
-    final_fontsize = int(_clamp_number(fontsize, 10, 200, 16) * 0.85)
-    if final_fontsize < 10:
-        final_fontsize = 10
+    final_fontsize = int(_clamp_number(fontsize, 6, 200, 16) * 0.85)
 
     safe_font_name = _sanitize_font_name(font_name)
     bg_opacity = _clamp_number(bg_opacity, 0.0, 1.0, 0.0)
@@ -626,6 +623,8 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         f"Outline={outline_width},"
         f"Shadow=0,"
         f"MarginV={SAFE_MARGIN_V},"
+        f"MarginL={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
+        f"MarginR={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
         f"Bold=1"
     )
 
@@ -665,7 +664,7 @@ def _video_size(path):
 def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
                    font_name="Verdana", font_color="#FFFFFF",
                    border_color="#000000", border_width=2,
-                   bg_color="#000000", bg_opacity=0.0, mark=None):
+                   bg_color="#000000", bg_opacity=0.0, mark=None, horizontal_padding=6.17):
     """
     Burns subtitles into the video using FFmpeg.
     Supports two modes:
@@ -677,7 +676,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     main.mark_delivery), from the same decode. ``make_filter(vw, vh, video=,
     logo=, out=)`` is main.watermark_filter.
     """
-    vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize,
+    vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize, horizontal_padding=horizontal_padding,
                           font_name=font_name, font_color=font_color,
                           border_color=border_color, border_width=border_width,
                           bg_color=bg_color, bg_opacity=bg_opacity)

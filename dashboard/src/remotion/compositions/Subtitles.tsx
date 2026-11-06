@@ -121,7 +121,7 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
           fontFamily: fontStack,
           fontSize: style.fontSize,
           fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
-          maxWidth: "87.65%",
+          maxWidth: `${100 - 2 * (config.horizontalPadding ?? 6.17)}%`,
           ...bgStyle,
         }}
       >
@@ -232,7 +232,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
   }
 
   // A real continuous outline; offset glyph shadows split into copies at large widths.
-  const dropShadow = style.shadow
+  const dropShadow = style.shadow && !style.borderWidth
     ? `${style.shadow * (1920 / 288)}px ${style.shadow * (1920 / 288)}px 0px rgba(0,0,0,0.55)`
     : "";
 

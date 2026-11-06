@@ -25,3 +25,9 @@ test('thick outlines remain one continuous stroked glyph, with fill on top',()=>
   assert.equal(outline.textShadow,undefined);
   assert.equal(subtitleOutline(0,'#000000').WebkitTextStroke,'0px #000000');
 });
+
+test('sizes below Native remain distinct and match ASS sizing',()=>{
+  assert.ok(subtitleFontPixels(6,'Arial') < subtitleFontPixels(8,'Arial'));
+  assert.ok(subtitleFontPixels(8,'Arial') < subtitleFontPixels(16,'Arial'));
+  assert.equal(subtitleFontPixels(8,'Arial'),6*1920/288*2048/2288);
+});

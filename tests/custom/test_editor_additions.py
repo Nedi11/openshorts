@@ -99,3 +99,19 @@ def test_center_height_fit_preserves_top_and_bottom(source,width,height):
     top, bottom = pixel(width//2,5), pixel(width//2,height-6)
     assert top[0] > 200 and top[2] < 30
     assert bottom[2] > 200 and bottom[2] > bottom[0] + 150
+
+
+def test_caption_padding_small_size_and_stroke_without_shadow(tmp_path):
+    from subtitles import subtitles_filter
+    transcript = {'segments': [{'start': 0, 'end': 1, 'text': 'Hello world', 'words': [
+        {'word': 'Hello', 'start': 0, 'end': .5}, {'word': 'world', 'start': .5, 'end': 1}]}]}
+    path = tmp_path / 'caption.ass'
+    assert generate_ass(transcript, 0, 1, str(path), fontsize=8,
+                        horizontal_padding=20, border_width=2, shadow=2)
+    style = next(line for line in path.read_text().splitlines() if line.startswith('Style: Default')).split(',')
+    assert style[2] == '6'
+    assert style[17] == '0'  # no separate shadow behind an outlined glyph
+    assert style[19:21] == ['32', '32']
+    classic = subtitles_filter('caption.srt', horizontal_padding=20, fontsize=8)
+    assert 'MarginL=77,MarginR=77' in classic
+    assert 'Fontsize=6,' in classic
