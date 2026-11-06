@@ -30,6 +30,25 @@ from scenedetect.detectors import ContentDetector
 
 import gpu_decode
 
+def torch_threads():
+    """Intra-op threads for torch: TORCH_THREADS, else up to 8 (more measured no
+    faster for TransNetV2 on a 16-thread Ryzen 7 5700G)."""
+    try:
+        return max(1, int(os.environ.get("TORCH_THREADS") or min(8, os.cpu_count() or 1)))
+    except ValueError:
+        return min(8, os.cpu_count() or 1)
+
+
+def apply_torch_threads():
+    """Undo ultralytics' import-time OMP_NUM_THREADS=1 for torch's own pool."""
+    try:
+        import torch
+    except ImportError:
+        return
+    if torch.get_num_threads() < torch_threads():
+        torch.set_num_threads(torch_threads())
+
+
 # TransNetV2 input size (width x height), fixed by the trained model.
 _TN2_W, _TN2_H = 48, 27
 
@@ -120,6 +139,7 @@ def _detect_transnetv2(video_path):
     threshold = float(os.environ.get("TRANSNETV2_THRESHOLD", "0.5"))
 
     with _TN2_LOCK, torch.no_grad():
+        apply_torch_threads()
         tensor = torch.from_numpy(np.ascontiguousarray(frames)).to(model.device)
         single_frame_pred, _ = model.predict_frames(tensor, quiet=True)
         single_frame_pred = single_frame_pred.cpu()
