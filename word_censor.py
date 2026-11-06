@@ -19,7 +19,9 @@ DEFAULT_WORDS = ['fuck', 'fucking', 'fucked', 'shit', 'bullshit', 'bitch', 'assh
 PAD_BEFORE = 0.15
 PAD_AFTER = 0.05
 MAX_PAD = 1.0          # global padding, each side
-MAX_NUDGE = 1.0        # per-word adjustment, each side, either direction
+# Per-word adjustment bound, each side, either direction. Effectively
+# unlimited: sections clamp to the segment holding the word anyway.
+MAX_NUDGE = 600.0
 MIN_SECTION = 0.04
 
 
@@ -94,9 +96,14 @@ def sections(transcript, settings, segments):
             continue
         start = word['s'] - pad_before - _number(adj.get('before'), -MAX_NUDGE, MAX_NUDGE, 0)
         end = word['e'] + pad_after + _number(adj.get('after'), -MAX_NUDGE, MAX_NUDGE, 0)
+        if end - start < MIN_SECTION:
+            # Nudges that cross the edges must not quietly leave the word in.
+            raise ValueError(
+                f"The censored section for '{word['w']}' at {word['s']:.2f}s ends before it "
+                "starts. Reset its adjustment, or skip the word.")
         start, end = max(start, home['start']), min(end, home['end'])
         if end - start < MIN_SECTION:
-            continue
+            continue   # only grazes this segment's edge: nothing audible to censor
         out.append({'key': key, 'word': word['w'], 's': word['s'], 'e': word['e'],
                     'start': round(start, 3), 'end': round(end, 3)})
     return out

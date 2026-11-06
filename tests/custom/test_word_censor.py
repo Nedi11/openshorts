@@ -136,3 +136,21 @@ def test_bleep_sections_map_to_clip_time_and_skipped_words_keep_their_caption():
     captions = censor.censor_transcript(recut.virtual_transcript(two, segments), settings)
     assert [w['w'] for w in recut.transcript_words(captions)] == ['shit', '[bleep]']
     assert censor.clip_sections_for(two, settings, segments) == [[3.0, 3.5]]
+
+
+def test_crossed_nudges_are_refused_instead_of_leaving_the_word_in():
+    # The real case: start 1.0 s later and end 0.85 s earlier on a 0.12 s word.
+    crossed = _settings(pad_before=0.5, adjustments={'1': {'before': -1.0, 'after': -0.85}})
+    with pytest.raises(ValueError, match="ends before it starts"):
+        censor.sections(TRANSCRIPT, crossed, [{'start': 0, 'end': 3}])
+    # A word that only grazes the segment edge is still just left out.
+    assert censor.sections(TRANSCRIPT, _settings(pad_before=0, pad_after=0),
+                           [{'start': 1.48, 'end': 3}]) == []
+
+
+def test_per_word_adjustments_are_not_limited_to_one_second():
+    settings = _settings(pad_before=0, pad_after=0, adjustments={'1': {'before': 0.9 + 0.6, 'after': 1.25}})
+    assert settings['adjustments']['1.000'] == {'before': 1.5, 'after': 1.25, 'skip': False}
+    [section] = censor.sections(TRANSCRIPT, settings, [{'start': 0, 'end': 3}])
+    # 1.5 s earlier is clamped by the segment start, 1.25 s later by nothing.
+    assert (section['start'], section['end']) == (0, 2.75)

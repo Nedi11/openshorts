@@ -7,7 +7,7 @@ import {
 import { getApiUrl, withParam } from '../config';
 import { apiFetch, apiJson, QuotaError, openQuotaWall } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { censorSections, adjust, parseWords, PAD_BEFORE, PAD_AFTER } from '../lib/censorSections';
+import { censorSections, adjust, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEP } from '../lib/censorSections';
 
 // Full-screen clip editor: shows WHICH source segments a clip was cut from,
 // lets the user trim/extend/split/reorder them (word-snapped), and re-renders
@@ -23,7 +23,6 @@ const HIDE_SOURCE_KEY = 'openshorts_editor_hide_source';
 const audioKey = (mode, words, padBefore, padAfter, adjustments, musicMode, musicDb) =>
     JSON.stringify([mode, words, padBefore, padAfter, adjustments, musicMode, musicDb]);
 const fmtClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
-const fmtNudge = (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}s`;
 
 // Words per memoised transcript slice. See TranscriptChunk for why this exists.
 const CHUNK_WORDS = 50;
@@ -250,7 +249,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const censorList = useMemo(() => (censorMode === 'off' ? [] : censorSections(
         words, parseWords(censorWords), segments, censorPadBefore, censorPadAfter, censorAdjustments)),
     [censorMode, words, censorWords, segments, censorPadBefore, censorPadAfter, censorAdjustments]);
-    const nudge = (key, field, delta) => setCensorAdjustments((a) => adjust(a, key, field, ((a[key] || {})[field] || 0) + delta));
+    const canMove = (sec, edge, delta) => moveEdge(censorAdjustments, sec, edge, delta) !== null;
+    const move = (sec, edge, delta) => setCensorAdjustments((a) => moveEdge(a, sec, edge, delta) || a);
     // Hear one section on the source monitor: a beat before, through, a beat after.
     const playSection = (sec) => {
         const v = sourceRef.current;
@@ -282,10 +282,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const needsSourcePath = framing !== 'auto'
         || segments.some((s) => s.start < canonical.start - 0.05 || s.end > canonical.end + 0.05);
     const invalidSegments = segments.some(outOfRange);
+    // The server refuses these rather than leaving the word in.
+    const crossedWords = censorList.filter((c) => c.crossed && !c.skip);
     const overCaps = segments.length > limits.max_segments || total > limits.max_total_seconds;
     const canRender = !rendering && segments.length > 0 && !invalidSegments && !overCaps
         && segments.every((s) => s.end - s.start >= minSeg)
-        && (framing === 'auto' || sourceAvailable);
+        && (framing === 'auto' || sourceAvailable)
+        && !crossedWords.length;
 
     // ---- helpers ------------------------------------------------------------
     const snapEdge = useCallback((t, kind) => {
@@ -1550,7 +1553,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                     <input aria-label="Censor tail" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="0.5" step="0.01" value={censorPadAfter} onChange={e => setCensorPadAfter(Number(e.target.value))} />
                                 </label>
                                 <div>
-                                    <p className="readout mb-1">{censorMode === 'cut' ? 'Removed' : 'Bleeped'} in this clip ({censorList.filter((c) => !c.skip && !c.tooShort).length})</p>
+                                    <p className="readout mb-1">{censorMode === 'cut' ? 'Removed' : 'Bleeped'} in this clip ({censorList.filter((c) => !c.skip && !c.tooShort && !c.crossed).length})</p>
                                     {censorList.length === 0 ? (
                                         <p className="text-xs text-muted">No listed words are spoken in the current segments.</p>
                                     ) : (
@@ -1569,25 +1572,35 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                                         </span>
                                                     </div>
                                                     {!c.skip && (
-                                                        <div className="mt-1 grid grid-cols-2 gap-2 text-muted">
-                                                            <span className="flex items-center gap-1">start
-                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'before', 0.05)} aria-label="Start earlier">◀</button>
-                                                                <span className="font-mono">{fmtNudge(-c.before)}</span>
-                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'before', -0.05)} aria-label="Start later">▶</button>
-                                                            </span>
-                                                            <span className="flex items-center gap-1">end
-                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'after', -0.05)} aria-label="End earlier">◀</button>
-                                                                <span className="font-mono">{fmtNudge(c.after)}</span>
-                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'after', 0.05)} aria-label="End later">▶</button>
-                                                            </span>
+                                                        <div className="mt-1 space-y-1 text-muted">
+                                                            <p>
+                                                                removes <span className="font-mono text-ink2">{c.crossed ? '—' : `${fmtClock(c.clipStart)} – ${fmtClock(c.clipEnd)}`}</span>
+                                                                {(c.before || c.after) ? (
+                                                                    <button type="button" className="underline underline-offset-2 ml-2 hover:text-ink" onClick={() => setCensorAdjustments((a) => resetWord(a, c.key))}>reset</button>
+                                                                ) : null}
+                                                            </p>
+                                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                                                {[['start', 'Start'], ['end', 'End'], ['move', 'Move']].map(([edge, label]) => (
+                                                                    <span key={edge} className="flex items-center gap-1">{label}
+                                                                        <button type="button" className="btn-ghost !px-1 !py-0 disabled:opacity-30" disabled={!canMove(c, edge, -STEP)} onClick={() => move(c, edge, -STEP)} aria-label={`${label} ${STEP}s earlier`} title={`${STEP}s earlier`}>◀</button>
+                                                                        <button type="button" className="btn-ghost !px-1 !py-0 disabled:opacity-30" disabled={!canMove(c, edge, STEP)} onClick={() => move(c, edge, STEP)} aria-label={`${label} ${STEP}s later`} title={`${STEP}s later`}>▶</button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     )}
-                                                    {c.tooShort && !c.skip && <p className="text-warn mt-1">Too short to apply — move start earlier or end later.</p>}
+                                                    {c.crossed && !c.skip && (
+                                                        <p className="text-warn mt-1">
+                                                            The end is before the start, so this word can't be removed.{' '}
+                                                            <button type="button" className="underline underline-offset-2" onClick={() => setCensorAdjustments((a) => resetWord(a, c.key))}>reset this word</button>
+                                                        </p>
+                                                    )}
+                                                    {c.tooShort && !c.skip && <p className="text-muted mt-1">Only a sliver of this word is inside the clip; nothing is removed.</p>}
                                                 </li>
                                             ))}
                                         </ul>
                                     )}
-                                    <p className="text-[11px] text-muted mt-1">◀ ▶ move each edge by 0.05s from the padded section. Times are on the edited clip.</p>
+                                    <p className="text-[11px] text-muted mt-1">◀ earlier · ▶ later, 0.05s per click. Start/End move one edge, Move shifts the whole section. Times are on the edited clip.</p>
                                 </div>
                             </>}
                         </div>
@@ -1681,6 +1694,9 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             <div className="mb-3 px-3 py-2 rounded-input text-xs text-danger bg-[color-mix(in_oklab,var(--color-danger)_10%,transparent)] flex items-center gap-2">
                                 <AlertCircle size={14} className="shrink-0" /> {renderError}
                             </div>
+                        )}
+                        {crossedWords.length > 0 && (
+                            <p className="mb-3 text-[11px] text-warn">Fix or reset the bad word{crossedWords.length > 1 ? 's' : ''} whose end is before the start ({crossedWords.map((c) => c.word).join(', ')}) to render.</p>
                         )}
                         {overCaps && (
                             <p className="mb-3 text-[11px] text-warn lowercase">
