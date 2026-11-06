@@ -20,8 +20,8 @@ const SNAP_WINDOW_SECONDS = 0.35;
 const HIDE_SOURCE_KEY = 'openshorts_editor_hide_source';
 
 // Everything about the clip's audio a render bakes in; a change means re-render.
-const audioKey = (mode, words, padBefore, padAfter, adjustments, musicMode, musicDb) =>
-    JSON.stringify([mode, words, padBefore, padAfter, adjustments, musicMode, musicDb]);
+const audioKey = (mode, words, padBefore, padAfter, adjustments, musicMode, musicDb, musicQuality) =>
+    JSON.stringify([mode, words, padBefore, padAfter, adjustments, musicMode, musicDb, musicQuality]);
 // Millisecond precision: the finest censor step is 0.001 s.
 const fmtClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`;
 
@@ -124,6 +124,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     // Background music: off | remove | reduce (music_removal.py).
     const [musicMode, setMusicMode] = useState('off');
     const [musicDb, setMusicDb] = useState(18);
+    // fast (Demucs) | hq (Mel-Band RoFormer: cleaner in crowded scenes, ~8x slower).
+    const [musicQuality, setMusicQuality] = useState('fast');
     // Seconds per click on a censor section's edge buttons.
     const [censorStep, setCensorStep] = useState(0.05);
     const STEP = censorStep;
@@ -220,7 +222,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 setCensorAdjustments(adj);
                 setMusicMode(music.mode);
                 setMusicDb(music.reduce_db ?? 18);
-                setRenderedCensor(audioKey(censorship.mode, censorship.words.join(', '), pb, pa, adj, music.mode, music.reduce_db ?? 18));
+                setMusicQuality(music.quality || 'fast');
+                setRenderedCensor(audioKey(censorship.mode, censorship.words.join(', '), pb, pa, adj, music.mode, music.reduce_db ?? 18, music.quality || 'fast'));
                 dispatch({ type: 'init', segments: data.segments.map((s) => ({ ...s })) });
                 setRenderedSegments(data.segments.map((s) => ({ ...s })));
                 setPlaybackSegments(data.rendered_segments || data.segments);
@@ -248,7 +251,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const sourceOpen = sourceAvailable && showSource;
 
     const currentAudioKey = audioKey(censorMode, censorWords, censorPadBefore, censorPadAfter,
-        censorAdjustments, musicMode, musicDb);
+        censorAdjustments, musicMode, musicDb, musicQuality);
     // The words the render will bleep or cut, listed for checking and nudging.
     const censorList = useMemo(() => (censorMode === 'off' ? [] : censorSections(
         words, parseWords(censorWords), segments, censorPadBefore, censorPadAfter, censorAdjustments)),
@@ -918,6 +921,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     censor_adjustments: censorAdjustments,
                     music_mode: musicMode,
                     music_reduce_db: musicDb,
+                    music_quality: musicQuality,
                     framing,
                 }),
             });
@@ -1633,9 +1637,20 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                     <input aria-label="Music reduction" className="w-full accent-[var(--color-accent)]" type="range" min="6" max="30" step="1" value={musicDb} onChange={e => setMusicDb(Number(e.target.value))} />
                                 </label>
                             )}
-                            {musicMode !== 'off' && (
-                                <p className="text-xs text-muted">AI voice separation, applied when you render (about half a minute per minute of clip). Remove also drops crowd noise and room sound; sung vocals stay.</p>
-                            )}
+                            {musicMode !== 'off' && (<>
+                                <label className="block readout">Quality
+                                    <select aria-label="Music removal quality" className="input-field mt-1" value={musicQuality} onChange={e => setMusicQuality(e.target.value)}>
+                                        <option value="fast">Fast (about 20s per minute of clip)</option>
+                                        <option value="hq">High quality, slower (about 3 min per minute of clip)</option>
+                                    </select>
+                                </label>
+                                <p className="text-xs text-muted">
+                                    {musicQuality === 'hq'
+                                        ? 'Use for crowded or noisy places where Fast lets background music through. '
+                                        : 'Good for most clips; try High quality if music still slips through. '}
+                                    Applied when you render. Remove also drops crowd noise and room sound; sung vocals and nearby voices stay.
+                                </p>
+                            </>)}
                         </div>
                         {/* framing override */}
                         <div>

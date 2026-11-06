@@ -6,6 +6,12 @@ torchvision==0.26.0
 torchaudio==2.11.0
 # Music removal (music_removal.py); torchaudio above comes from the CPU index.
 demucs==4.0.1
+# High-quality music removal (Mel-Band RoFormer). protobuf stays below 5 for
+# mediapipe 0.10.14 (audio-separator's onnx would otherwise pull protobuf 7),
+# and the onnx weekly prerelease is pinned so builds stay reproducible.
+audio-separator==0.39.1
+protobuf==4.25.9
+onnx-weekly==1.23.0.dev20260629
 tqdm==4.67.3
 yt-dlp
 faster-whisper==1.2.1

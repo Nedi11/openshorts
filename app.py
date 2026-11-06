@@ -4912,7 +4912,8 @@ async def get_clip_edl(job_id: str, clip_index: int, request: Request):
         "segments": segments,
         "rendered_segments": (clip.get("recipe") or {}).get("segments") or segments,
         "censorship": clip.get("censorship") or {"mode": "off", "words": word_censor.DEFAULT_WORDS},
-        "music_removal": clip.get("music_removal") or {"mode": "off", "reduce_db": music_removal.DEFAULT_REDUCE_DB},
+        "music_removal": {"mode": "off", "reduce_db": music_removal.DEFAULT_REDUCE_DB, "quality": "fast",
+                          **(clip.get("music_removal") or {})},
         "framing": (clip.get('recipe') or {}).get('framing') or 'auto',
         "canonical_range": canonical_range,
         "duration": total,
@@ -4948,7 +4949,8 @@ def _audio_processor(music, clip_sections):
         return None
     def process(path):
         if mode != 'off':
-            music_removal.process(path, mode, (music or {}).get('reduce_db', music_removal.DEFAULT_REDUCE_DB))
+            music_removal.process(path, mode, (music or {}).get('reduce_db', music_removal.DEFAULT_REDUCE_DB),
+                                  (music or {}).get('quality', 'fast'))
         if clip_sections:
             word_censor.bleep(path, clip_sections)
     return process
@@ -4973,6 +4975,8 @@ class RerenderRequest(BaseModel):
     # Background music: off | remove | reduce (music_removal.py).
     music_mode: str = "off"
     music_reduce_db: float = music_removal.DEFAULT_REDUCE_DB
+    # fast (Demucs) | hq (Mel-Band RoFormer, ~8x slower, better in crowded scenes).
+    music_quality: str = "fast"
 
 
 # Manual framing -> reframe-engine strategy. 'full' shows the whole source
@@ -5075,7 +5079,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
         censorship = word_censor.normalize_settings(
             req.censor_mode, req.censor_words, req.censor_pad_before,
             req.censor_pad_after, req.censor_adjustments)
-        music = music_removal.normalize_settings(req.music_mode, req.music_reduce_db)
+        music = music_removal.normalize_settings(req.music_mode, req.music_reduce_db, req.music_quality)
         censor_sections = word_censor.sections(transcript, censorship, segments)
         if req.censor_mode == 'cut':
             segments = word_censor.cut_segments(segments, censor_sections)

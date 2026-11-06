@@ -219,3 +219,17 @@ use that grid. This also matches the editor preview, which already assumed
 equal x/y units. Existing clips keep their burned pixels until their captions
 are applied again. Tests: tests/custom/test_caption_outline.py (renders and
 measures side vs top stroke for ASS and Classic, 9:16 and square).
+
+AUDIO-003 (implemented): music removal has a quality choice. Fast is Demucs
+htdemucs (AUDIO-002, ~0.3x the clip length). High quality is Mel-Band RoFormer
+(vocals_mel_band_roformer via audio-separator, ~2.6x the clip length on a
+Ryzen 7 5700G CPU). On a real crowded-shop clip, in the speech pauses that held
+music, it cut the music 11–40 dB where htdemucs managed 2–4 dB (htdemucs files
+room music recorded on a phone as "vocals"). Pauses filled with nearby voices
+stay with either model. The separator's own peak normalisation is disabled
+(threshold 1.0) so the reduce mix keeps the voice level. Weights (~900 MB) are
+baked into /opt/separator. protobuf stays pinned below 5 for mediapipe and the
+onnx weekly prerelease is pinned. Saved as music_removal.quality and
+re-applied on reframe. Implementation: music_removal.py, app.py, ClipEditor.jsx,
+Dockerfile, requirements.txt. Tests: tests/custom/test_music_removal.py,
+tests/test_rerender_endpoint.py.

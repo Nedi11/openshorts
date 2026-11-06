@@ -136,11 +136,11 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuse
 # Create directories including Ultralytics cache config. /app/.cache/huggingface
 # exists in-image (appuser-owned via the chown below) so a persistent volume
 # mounted there inherits writable ownership for the ASR model downloads.
-RUN mkdir -p /app/uploads /app/output /app/.cache/huggingface /tmp/Ultralytics /opt/demucs
+RUN mkdir -p /app/uploads /app/output /app/.cache/huggingface /tmp/Ultralytics /opt/demucs /opt/separator
 # Fix permissions: /app for code/uploads, /tmp/Ultralytics for AI cache,
 # /opt/demucs for the music-removal weights (outside the /app/.cache volume,
 # which would hide anything baked into the image there).
-RUN chown -R appuser:appuser /app /tmp/Ultralytics /opt/demucs
+RUN chown -R appuser:appuser /app /tmp/Ultralytics /opt/demucs /opt/separator
 
 # Switch to non-root user
 USER appuser
@@ -149,6 +149,8 @@ USER appuser
 RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt'); YOLO('yolov8s.pt')"
 # Music removal weights (Demucs htdemucs, ~80 MB, MIT): music_removal.MODEL_DIR.
 RUN python -c "import music_removal; music_removal.load_model()"
+# High-quality music removal weights (Mel-Band RoFormer, ~900 MB): HQ_MODEL_DIR.
+RUN python -c "import music_removal; music_removal.load_hq()"
 
 # Expose FastAPI port
 EXPOSE 8000

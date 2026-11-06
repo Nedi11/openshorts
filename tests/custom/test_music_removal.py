@@ -20,8 +20,9 @@ def test_mix_keeps_voice_and_scales_the_rest():
 
 
 def test_settings_are_validated():
-    assert music_removal.normalize_settings("Reduce", "12") == {"mode": "reduce", "reduce_db": 12.0}
-    for bad in (("louder", 18), ("reduce", 1), ("reduce", "x")):
+    assert music_removal.normalize_settings("Reduce", "12") == {"mode": "reduce", "reduce_db": 12.0, "quality": "fast"}
+    assert music_removal.normalize_settings("remove", 18, "HQ")["quality"] == "hq"
+    for bad in (("louder", 18), ("reduce", 1), ("reduce", "x"), ("remove", 18, "best")):
         with pytest.raises(ValueError):
             music_removal.normalize_settings(*bad)
 
@@ -63,3 +64,38 @@ def test_off_and_silent_clips_are_left_alone(tmp_path, monkeypatch):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=s=64x64:d=1",
                         "-c:v", "libx264", path], check=True)
         music_removal.process(path, "remove")
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg unavailable")
+def test_quality_picks_the_separator(tmp_path, monkeypatch):
+    path = str(tmp_path / "clip.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=s=64x64:d=1", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-c:a", "aac", "-shortest", path],
+                   check=True)
+    used = []
+    monkeypatch.setattr(music_removal, "separate_voice", lambda wav, rate: used.append("fast") or wav)
+    monkeypatch.setattr(music_removal, "separate_voice_hq", lambda wav: used.append("hq") or wav)
+    music_removal.process(path, "remove")
+    music_removal.process(path, "reduce", 12, "hq")
+    assert used == ["fast", "hq"]
+
+
+def test_hq_separator_keeps_the_voice_level(monkeypatch):
+    """The RoFormer stem is read back at the original length and level (no
+    normalisation), so reduce's original - voice mix stays exact."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg unavailable")
+    pytest.importorskip("scene_detection")
+    wav = (np.random.default_rng(0).standard_normal((2, 44100)) * 0.2).astype(np.float32)
+
+    class FakeSeparator:
+        def separate(self, src, custom_output_names):
+            out = src.replace("in_", "out_")
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-t", "0.9", out], check=True)
+            return [out]
+    monkeypatch.setattr(music_removal, "load_hq", lambda: FakeSeparator())
+    monkeypatch.setattr(music_removal, "HQ_WORK_DIR", "/tmp")
+    voice = music_removal.separate_voice_hq(wav)
+    assert voice.shape == wav.shape                    # padded back to full length
+    assert np.allclose(voice[:, :39690], wav[:, :39690], atol=1e-4)
+    assert not voice[:, 39700:].any()
