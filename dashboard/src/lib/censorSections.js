@@ -9,7 +9,9 @@ const MIN_SECTION = 0.01;   // word_censor.MIN_SECTION
 // The editor never lets a nudge shrink a section below this.
 export const MIN_EDIT_LENGTH = 0.01;
 // Click sizes the editor offers for moving an edge.
-export const STEPS = [0.01, 0.05, 0.25];
+// Times are kept to the millisecond everywhere (word_censor, recut), so 0.001 s
+// is the finest meaningful step.
+export const STEPS = [0.001, 0.005, 0.01, 0.05, 0.25];
 
 export function normalizeWord(word) {
     return String(word).toLowerCase().replace(/[^\p{L}\p{N}_']/gu, '').replace(/^'+|'+$/g, '');
