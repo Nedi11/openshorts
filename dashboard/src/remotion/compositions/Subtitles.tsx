@@ -10,7 +10,7 @@ import {
 import { subtitleOutline, subtitleShadowCss, customCaptionBottom } from "../../lib/subtitleGeometry";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
-import { getFontStack, antonFontFace, montserratFontFace, liberationFontFaces } from "../lib/fonts";
+import { getFontStack, antonFontFace, montserratFontFace, liberationFontFaces, tiktokSansFontFace } from "../lib/fonts";
 
 interface SubtitlesProps {
   config: SubtitleConfig;
@@ -37,7 +37,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ config }) => {
 
   return (
     <AbsoluteFill>
-      <style>{antonFontFace + montserratFontFace + liberationFontFaces}</style>
+      <style>{antonFontFace + montserratFontFace + liberationFontFaces + tiktokSansFontFace}</style>
       {blocks.map((block, i) => {
         const startFrame = Math.round((block.startMs / 1000) * fps);
         const durationFrames = Math.max(

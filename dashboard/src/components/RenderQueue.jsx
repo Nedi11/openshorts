@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, ChevronDown, Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { subscribeBrowserRenders, cancelBrowserRender } from '../lib/browserRenderQueue';
@@ -23,7 +24,35 @@ function renderStatus(record, serverUnavailable) {
   return record.state === 'completed' ? 'Completed' : 'Failed';
 }
 
+// The queue lives INSIDE a top bar instead of floating over the page, which
+// covered the header's own controls and dropdowns. Each top bar renders a
+// RenderQueueSlot; the queue shows in the most recently mounted one (the clip
+// editor's header while it is open, else the app header). One queue instance,
+// so polling and cancel state are shared.
+const slots = [];
+const slotListeners = new Set();
+const notifySlots = () => slotListeners.forEach((listener) => listener());
+
+export function RenderQueueSlot() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    slots.push(el);
+    notifySlots();
+    return () => { slots.splice(slots.indexOf(el), 1); notifySlots(); };
+  }, []);
+  return <div ref={ref} className="relative shrink-0" data-render-queue-slot="" />;
+}
+
+function useTopSlot() {
+  const [, rerender] = useReducer((x) => x + 1, 0);
+  useEffect(() => { slotListeners.add(rerender); rerender(); return () => { slotListeners.delete(rerender); }; }, []);
+  return slots[slots.length - 1] || null;
+}
+
 export default function RenderQueue({ enabled }) {
+  const slot = useTopSlot();
+  const panelRef = useRef(null);
   const [serverRenders, setRenders] = useState([]);
   const [browserRenders, setBrowserRenders] = useState([]);
   const renders = [...serverRenders, ...browserRenders];
@@ -75,13 +104,22 @@ export default function RenderQueue({ enabled }) {
       }
     } catch (e) { setError(e.message); }
   }
+  // Close the dropdown on an outside click or Escape, like the header's menus.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
   const hasActive = renders.some(record => ACTIVE.has(record.state));
   useEffect(() => {
     if (!enabled || !hasActive) return undefined;
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(timer);
   }, [enabled, hasActive]);
-  if (!enabled) return null;
+  if (!enabled || !slot) return null;
   const running = renders.filter(r => r.state === 'running' && (!error || r.id.startsWith('browser-'))).length;
   const queued = renders.filter(r => r.state === 'queued').length;
   let browserPosition = 0;
@@ -90,14 +128,16 @@ export default function RenderQueue({ enabled }) {
     return record;
   });
   const recent = renders.filter(r => !ACTIVE.has(r.state)).sort((a, b) => b.finished_at - a.finished_at).slice(0, 8);
-  return <aside className="fixed top-16 right-3 z-[130] w-72 max-w-[calc(100vw-24px)] rounded-card border border-rule bg-paper shadow-lg" aria-label="Render queue">
-    <button type="button" className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm" onClick={() => setOpen(value => !value)} aria-expanded={open}>
-      <span className="flex items-center gap-2">{running > 0 && <Loader2 size={14} className="animate-spin" />}Render queue</span>
-      <span className="text-xs text-muted">{error ? 'Server unavailable' : `${running} running · ${queued} queued`}</span>
-      {(error || warning) && <AlertTriangle size={14} className="text-warn" aria-label="Queue warning" />}
-      <ChevronDown size={14} />
+  return createPortal(<aside ref={panelRef} aria-label="Render queue">
+    <button type="button" className="flex items-center gap-1.5 rounded-input border border-rule2 px-2.5 py-1.5 text-xs text-ink2 hover:bg-paper3 transition-colors" onClick={() => setOpen(value => !value)} aria-expanded={open}>
+      {running > 0 && <Loader2 size={13} className="animate-spin" />}
+      <span>Render queue</span>
+      <span className="text-muted hidden sm:inline">{error ? '· Server unavailable' : `· ${running} running · ${queued} queued`}</span>
+      {!error && running + queued > 0 && <span className="text-muted sm:hidden">· {running + queued}</span>}
+      {(error || warning) && <AlertTriangle size={13} className="text-warn" aria-label="Queue warning" />}
+      <ChevronDown size={13} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
     </button>
-    {open && <div className="border-t border-rule p-3 space-y-3 max-h-[55vh] overflow-y-auto text-xs">
+    {open && <div className="absolute right-0 top-full mt-2 z-[130] w-80 max-w-[calc(100vw-24px)] rounded-card border border-rule bg-paper shadow-lg p-3 space-y-3 max-h-[55vh] overflow-y-auto text-xs">
       {error && <p role="alert" className="text-danger">{error}</p>}
       {warning && <p role="alert" className="text-warn">{warning}</p>}
       {!renders.length && <p className="text-muted">No edit renders yet. Clip edits, reframing, captions and hooks appear here.</p>}
@@ -111,5 +151,5 @@ export default function RenderQueue({ enabled }) {
         {render.error && <p className="text-danger break-words">{render.error}</p>}
       </div>)}
     </div>}
-  </aside>;
+  </aside>, slot);
 }

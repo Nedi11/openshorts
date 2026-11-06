@@ -4,7 +4,7 @@ import KeyInput from './components/KeyInput';
 import MediaInput from './components/MediaInput';
 import McpConnectCard from './components/McpConnectCard';
 import ResultCard from './components/ResultCard';
-import RenderQueue from './components/RenderQueue';
+import RenderQueue, { RenderQueueSlot } from './components/RenderQueue';
 import ProcessingAnimation from './components/ProcessingAnimation';
 // import Gallery from './components/Gallery';
 import ThumbnailStudio from './components/ThumbnailStudio';
@@ -1551,6 +1551,7 @@ function App() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {!billingEnabled && <RenderQueueSlot />}
             {userProfiles.length > 0 && (
               <UserProfileSelector
                 profiles={userProfiles}

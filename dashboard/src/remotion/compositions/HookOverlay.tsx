@@ -12,6 +12,7 @@ import {
   notoSerifFontFace,
   montserratFontFace,
   antonFontFace,
+  tiktokSansFontFace,
   HOOK_FONTS,
 } from "../lib/fonts";
 
@@ -59,7 +60,7 @@ export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
 
   return (
     <AbsoluteFill>
-      <style>{notoSerifFontFace + montserratFontFace + antonFontFace}</style>
+      <style>{notoSerifFontFace + montserratFontFace + antonFontFace + tiktokSansFontFace}</style>
       <Sequence from={0} durationInFrames={displayFrames} layout="none">
         <HookBox config={config} displayFrames={displayFrames} />
       </Sequence>

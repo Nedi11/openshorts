@@ -9,6 +9,7 @@ import SegmentedControl from './ui/SegmentedControl';
 const FONT_OPTIONS = [
     { value: 'Anton', label: 'Anton' },
     { value: 'Montserrat ExtraBold', label: 'Montserrat' },
+    { value: 'TikTok Sans', label: 'TikTok Sans' },
     { value: 'Verdana', label: 'Verdana' },
     { value: 'Arial', label: 'Arial' },
     { value: 'Impact', label: 'Impact' },

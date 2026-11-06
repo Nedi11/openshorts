@@ -36,6 +36,11 @@ HOOK_FONTS = {
     "montserrat": (PILL_FONT_PATH, 0.064),
     "anton": (os.path.join(FONT_DIR, "Anton-Regular.ttf"), 0.08),
     "serif": (FONT_PATH, 0.05),
+    # TikTok Sans Bold (SIL OFL, fonts/TikTokSans-OFL.txt): static 700 / opsz 36
+    # instance of the upstream variable font. Narrower than Montserrat, so a
+    # larger factor: 0.0755 would match its width exactly, 0.07 keeps the
+    # letters from growing much taller.
+    "tiktok": (os.path.join(FONT_DIR, "TikTokSans-Bold.ttf"), 0.07),
 }
 
 # Codepoint ranges NotoSerif has no glyphs for (would render as tofu boxes).

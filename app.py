@@ -6092,7 +6092,7 @@ class HookRequest(BaseModel):
     size: Optional[str] = "M" # S, M, L
     duration_seconds: Optional[float] = None  # None = hook visible for the whole clip
     style: Optional[str] = "pill"  # pill/classic/dark/yellow/red/outline/outline_yellow
-    font: Optional[str] = None  # montserrat/anton/serif (hooks.HOOK_FONTS); None = the style's own
+    font: Optional[str] = None  # montserrat/anton/serif/tiktok (hooks.HOOK_FONTS); None = the style's own
     remove: Optional[bool] = False  # strip the burned hook instead of adding one
 
 @app.post("/api/hook")

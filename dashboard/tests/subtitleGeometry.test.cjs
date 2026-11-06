@@ -46,3 +46,8 @@ test('custom caption height uses the burn margin rounding', () => {
   assert.equal(customCaptionBottom(25), 72 / 288 * 100);
   assert.equal(customCaptionBottom(500), Math.round(288 * 0.9) / 288 * 100);
 });
+
+test('TikTok Sans preview size uses its own libass metrics', () => {
+  // unitsPerEm 1000, winAscent 1118 + winDescent 242 (fonts/TikTokSans-*.ttf).
+  assert.ok(Math.abs(subtitleFontPixels(34, 'TikTok Sans') - 28 * 1920 / 288 * 1000 / 1360) < 1e-9);
+});

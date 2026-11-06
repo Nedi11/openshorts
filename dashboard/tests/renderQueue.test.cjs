@@ -14,6 +14,7 @@ global.document = dom.window.document;
 dom.window.HTMLMediaElement.prototype.load = () => {};
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let RenderQueue;
+let RenderQueueSlot;
 let ResultCard;
 let bundleDirectory;
 let container;
@@ -28,7 +29,7 @@ before(async () => {
   const outfile = path.join(bundleDirectory, 'component.cjs');
   await build({
     entryPoints: [path.join(__dirname, '../src/components/RenderQueue.jsx')],
-    outfile, bundle: true, platform: 'node', format: 'cjs', external: ['react'],
+    outfile, bundle: true, platform: 'node', format: 'cjs', external: ['react', 'react-dom'],
     plugins: [{ name: 'queue-test-adapters', setup(builder) {
       builder.onLoad({ filter: /\/lib\/api\.js$/ }, () => ({ contents:
         'export const apiFetch = (...args) => globalThis.queueTestFetch(...args);' }));
@@ -37,10 +38,11 @@ before(async () => {
     } }],
   });
   RenderQueue = require(outfile).default;
+  RenderQueueSlot = require(outfile).RenderQueueSlot;
   const cardfile = path.join(bundleDirectory, 'card.cjs');
   await build({
     entryPoints: [path.join(__dirname, '../src/components/ResultCard.jsx')],
-    outfile: cardfile, bundle: true, platform: 'node', format: 'cjs', external: ['react'],
+    outfile: cardfile, bundle: true, platform: 'node', format: 'cjs', external: ['react', 'react-dom'],
     plugins: [{ name: 'card-test-adapters', setup(builder) {
       builder.onLoad({ filter: /\/lib\/api\.js$/ }, () => ({ contents:
         'export const apiFetch = (...args) => globalThis.queueTestFetch(...args);' }));
@@ -93,8 +95,11 @@ function row(id = 'server-1', state = 'running') {
   return { id, state, operation: 'Re-render clip', job_id: 'job', clip_index: 2,
     created_at: Date.now() / 1000, started_at: Date.now() / 1000 };
 }
+// The queue shows inside a top-bar slot (RenderQueueSlot), as in App.jsx.
 async function mount(enabled = true) {
-  await act(async () => { root.render(React.createElement(RenderQueue, { enabled })); });
+  await act(async () => { root.render(React.createElement(React.Fragment, null,
+    React.createElement('header', { id: 'app-bar' }, React.createElement(RenderQueueSlot)),
+    React.createElement(RenderQueue, { enabled }))); });
 }
 async function tick(context, milliseconds) {
   await act(async () => { context.mock.timers.tick(milliseconds); });
@@ -221,4 +226,28 @@ test('new renders never expand the collapsed queue', async () => {
   await act(async () => [...container.querySelectorAll('button')].find(b=>b.textContent==='Cancel render').click());
   assert.equal(cancelled,'browser-new');
   delete global.queueTestCancel;
+});
+
+test('the queue sits inside the top bar, covers nothing until opened, and moves to the editor bar', async () => {
+  globalThis.queueTestFetch = async () => ({ ok: true, json: async () => ({ renders: [] }) });
+  function Page({ editor }) {
+    return React.createElement(React.Fragment, null,
+      React.createElement('header', { id: 'app-bar' }, React.createElement(RenderQueueSlot)),
+      editor && React.createElement('div', { id: 'editor-bar' }, React.createElement(RenderQueueSlot)),
+      React.createElement(RenderQueue, { enabled: true }));
+  }
+  await act(async () => { root.render(React.createElement(Page, { editor: false })); });
+  const queue = () => container.querySelector('[aria-label="Render queue"]');
+  assert.equal(queue().closest('header').id, 'app-bar');
+  assert.ok(!queue().outerHTML.includes('fixed'));          // no floating overlay
+  assert.equal(queue().querySelectorAll('p').length, 0);    // collapsed: just the button
+  await act(async () => { root.render(React.createElement(Page, { editor: true })); });
+  assert.ok(queue().closest('#editor-bar'));
+  await act(async () => { root.render(React.createElement(Page, { editor: false })); });
+  assert.equal(queue().closest('header').id, 'app-bar');
+  // Opening drops the list below the button; an outside click closes it.
+  await act(async () => { queue().querySelector('button').click(); });
+  assert.ok(queue().querySelector('.absolute'));
+  await act(async () => { document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })); });
+  assert.equal(queue().querySelector('.absolute'), null);
 });
