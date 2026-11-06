@@ -144,7 +144,7 @@ RUN chown -R appuser:appuser /app /tmp/Ultralytics
 USER appuser
 
 # Pre-download YOLO model on build (now running as appuser)
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt'); YOLO('yolov8s.pt')"
 
 # Expose FastAPI port
 EXPOSE 8000

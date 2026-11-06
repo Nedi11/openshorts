@@ -11,9 +11,17 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
+import os
+# Importing ultralytics sets OMP_NUM_THREADS=1 whenever it is unset, which left
+# this whole process single-threaded for OpenMP: torch (TransNetV2 scene
+# detection, YOLO) and faster-whisper. Measured on a Ryzen 7 5700G: scene
+# detection ~41s -> ~13s per 60s clip, medium transcription 35.7s -> 12.7s per
+# 30s of audio. Set a real pool first; TORCH_THREADS or an explicit
+# OMP_NUM_THREADS still win.
+os.environ.setdefault("OMP_NUM_THREADS", str(max(1, int(
+    os.environ.get("TORCH_THREADS") or min(8, os.cpu_count() or 1)))))
 from ultralytics import YOLO
 import torch
-import os
 import math
 import numpy as np
 from tqdm import tqdm
@@ -92,17 +100,37 @@ OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by pre
 # Load the YOLO model once (Keep for backup or scene analysis if needed)
 # YOLO_MODEL_PATH lets deployments point at a pre-downloaded weights file so a
 # volume mounted over the workdir doesn't trigger a re-download at startup.
-model = YOLO(os.environ.get("YOLO_MODEL_PATH", "yolov8n.pt"))
+#
+# Small (not Nano) by default: YOLO only runs when no face is found (about 30-40
+# calls per 60s clip), so the more accurate model cost ~1s per clip in a
+# benchmark on a Ryzen 7 5700G. YOLO_MODEL_PATH=yolov8n.pt restores Nano; both
+# are baked into the image.
+model = YOLO(os.environ.get("YOLO_MODEL_PATH", "yolov8s.pt"))
 
 # --- MediaPipe Setup ---
 # Use standard Face Detection (BlazeFace) for speed
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
+# Detect every Nth frame; SmoothedCameraman interpolates between updates.
+# 2 (was 4): finer target updates for less tracking lag. MediaPipe runs on
+# downscaled frames, so it cost ~2-3s per 60s clip in the benchmark.
+DETECT_STRIDE = max(int(os.environ.get("DETECT_STRIDE", "2")), 1)
+# YOLO fallback (no face found) is far heavier than MediaPipe — extra throttle.
+YOLO_FALLBACK_STRIDE = DETECT_STRIDE * 2
+
+# The tracker damping below was tuned at DETECT_STRIDE=4 and counts DETECTIONS,
+# so its defaults scale with the stride to keep the same timing in frames.
+_STRIDE_SCALE = DETECT_STRIDE / 4
+
 # Consecutive detections a large target move must survive before the camera
 # follows it (see SmoothedCameraman.update_target). Env-overridable so the
 # damping can be dialled back without a deploy; 1 restores the old behaviour.
-JUMP_CONFIRM_FRAMES = max(int(os.environ.get("JUMP_CONFIRM_FRAMES", "3")), 1)
+# Default: 3 detections at stride 4 (~0.4s at 30fps), i.e. 12 frames.
+JUMP_CONFIRM_FRAMES = max(int(os.environ.get("JUMP_CONFIRM_FRAMES")
+                              or round(3 / _STRIDE_SCALE)), 1)
+# SpeakerTracker's per-detection score decay, 0.85 per detection at stride 4.
+SPEAKER_SCORE_DECAY = 0.85 ** _STRIDE_SCALE
 
 # Reset the tracker and the cameraman's damping at every scene cut, so the
 # first face found in the new shot is framed instantly instead of being treated
@@ -342,7 +370,7 @@ class SpeakerTracker:
 
         # 2. Update Scores with decay
         for pid in list(self.speaker_scores.keys()):
-             self.speaker_scores[pid] *= 0.85 # Faster decay (was 0.9)
+             self.speaker_scores[pid] *= SPEAKER_SCORE_DECAY  # 0.85 per detection at stride 4
              if self.speaker_scores[pid] < 0.1:
                  del self.speaker_scores[pid]
 
@@ -416,10 +444,7 @@ DETECT_MAX_WIDTH = 640
 # in parallel, so every inference goes through this lock. Contention is small
 # (a few ms per call) — the ffmpeg renders are where the parallel time goes.
 DETECT_LOCK = threading.Lock()
-# Detect every Nth frame; SmoothedCameraman interpolates between updates.
-DETECT_STRIDE = max(int(os.environ.get("DETECT_STRIDE", "4")), 1)
-# YOLO fallback (no face found) is far heavier than MediaPipe — extra throttle.
-YOLO_FALLBACK_STRIDE = DETECT_STRIDE * 2
+# DETECT_STRIDE / YOLO_FALLBACK_STRIDE are defined with the tracker tuning above.
 
 
 def _detection_frame(frame):

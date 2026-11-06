@@ -128,3 +128,21 @@ custom-height karaoke captions and a blurred 120° shadow in one encode.
 EDIT-004 (implemented): in the hook and caption editors the preview is sticky on
 desktop widths, so scrolling the controls no longer scrolls the video away.
 Phones keep the stacked layout. Implementation: HookModal.jsx, SubtitleModal.jsx.
+PERF-001 (implemented): main.py sets OMP_NUM_THREADS (TORCH_THREADS, else up to
+8) before importing ultralytics, which otherwise forces it to 1 for the whole
+job process. That had left TransNetV2 scene detection, YOLO and faster-whisper
+single-threaded. Measured on a Ryzen 7 5700G (CPU, AMD VAAPI encode, 60 s
+clips): scene detection ~41 s -> ~13 s; total reframe ~56 s -> 30-33 s even with
+TRACK-001's extra detection work; medium int8 transcription of 30 s of audio
+35.7 s -> 12.7 s. scene_detection.apply_torch_threads covers the API process.
+An explicit OMP_NUM_THREADS or TORCH_THREADS still wins.
+
+TRACK-001 (implemented): face detection runs every 2nd frame (DETECT_STRIDE=2,
+was 4) and the no-face person fallback uses YOLOv8 Small (yolov8s.pt, baked
+into the image beside yolov8n.pt). The tracker's per-detection damping keeps
+its tuned timing in frames: JUMP_CONFIRM_FRAMES defaults to 12 / stride
+detections and the speaker score decay to 0.85^(stride/4). DETECT_STRIDE=4 with
+YOLO_MODEL_PATH=yolov8n.pt restores the previous tracker exactly. Benchmarked
+cost before PERF-001: about 2-4 s per 60 s clip. Speaker detection from mouth
+motion (SPEAKER_SIGNAL) remains off. Tests: tests/custom/test_tracking_defaults.py
+(fresh-interpreter import checks; skipped without the ML stack).
