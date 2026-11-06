@@ -7,6 +7,7 @@ import {
 import { getApiUrl, withParam } from '../config';
 import { apiFetch, apiJson, QuotaError, openQuotaWall } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { censorSections, adjust, parseWords, PAD_BEFORE, PAD_AFTER } from '../lib/censorSections';
 
 // Full-screen clip editor: shows WHICH source segments a clip was cut from,
 // lets the user trim/extend/split/reorder them (word-snapped), and re-renders
@@ -17,6 +18,12 @@ const SNAP_WINDOW_SECONDS = 0.35;
 
 // Hiding the source is a working preference, not a per-clip one, so it sticks.
 const HIDE_SOURCE_KEY = 'openshorts_editor_hide_source';
+
+// Everything about the clip's audio a render bakes in; a change means re-render.
+const audioKey = (mode, words, padBefore, padAfter, adjustments, musicMode, musicDb) =>
+    JSON.stringify([mode, words, padBefore, padAfter, adjustments, musicMode, musicDb]);
+const fmtClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+const fmtNudge = (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}s`;
 
 // Words per memoised transcript slice. See TranscriptChunk for why this exists.
 const CHUNK_WORDS = 50;
@@ -109,6 +116,14 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const [censorMode, setCensorMode] = useState('off');
     const [censorWords, setCensorWords] = useState('');
     const [renderedCensor, setRenderedCensor] = useState('');
+    // Seconds every censored section starts before / ends after its word, and
+    // per-word nudges / skips keyed by the word's source start (word_censor.py).
+    const [censorPadBefore, setCensorPadBefore] = useState(PAD_BEFORE);
+    const [censorPadAfter, setCensorPadAfter] = useState(PAD_AFTER);
+    const [censorAdjustments, setCensorAdjustments] = useState({});
+    // Background music: off | remove | reduce (music_removal.py).
+    const [musicMode, setMusicMode] = useState('off');
+    const [musicDb, setMusicDb] = useState(18);
     const [renderedFraming, setRenderedFraming] = useState('auto');
     // The recipe of the currently RENDERED preview (playhead maps onto it).
     const [renderedSegments, setRenderedSegments] = useState(null);
@@ -191,9 +206,18 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 if (cancelled) return;
                 setEdl(data);
                 const censorship = data.censorship || {mode:'off', words:[]};
+                const music = data.music_removal || { mode: 'off', reduce_db: 18 };
+                const pb = censorship.pad_before ?? PAD_BEFORE;
+                const pa = censorship.pad_after ?? PAD_AFTER;
+                const adj = censorship.adjustments || {};
                 setCensorMode(censorship.mode);
                 setCensorWords(censorship.words.join(', '));
-                setRenderedCensor(JSON.stringify([censorship.mode, censorship.words.join(', ')]));
+                setCensorPadBefore(pb);
+                setCensorPadAfter(pa);
+                setCensorAdjustments(adj);
+                setMusicMode(music.mode);
+                setMusicDb(music.reduce_db ?? 18);
+                setRenderedCensor(audioKey(censorship.mode, censorship.words.join(', '), pb, pa, adj, music.mode, music.reduce_db ?? 18));
                 dispatch({ type: 'init', segments: data.segments.map((s) => ({ ...s })) });
                 setRenderedSegments(data.segments.map((s) => ({ ...s })));
                 setPlaybackSegments(data.rendered_segments || data.segments);
@@ -220,12 +244,30 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     // the hide button asks for, so both cases share one code path.
     const sourceOpen = sourceAvailable && showSource;
 
+    const currentAudioKey = audioKey(censorMode, censorWords, censorPadBefore, censorPadAfter,
+        censorAdjustments, musicMode, musicDb);
+    // The words the render will bleep or cut, listed for checking and nudging.
+    const censorList = useMemo(() => (censorMode === 'off' ? [] : censorSections(
+        words, parseWords(censorWords), segments, censorPadBefore, censorPadAfter, censorAdjustments)),
+    [censorMode, words, censorWords, segments, censorPadBefore, censorPadAfter, censorAdjustments]);
+    const nudge = (key, field, delta) => setCensorAdjustments((a) => adjust(a, key, field, ((a[key] || {})[field] || 0) + delta));
+    // Hear one section on the source monitor: a beat before, through, a beat after.
+    const playSection = (sec) => {
+        const v = sourceRef.current;
+        if (!v) return;
+        try { v.currentTime = Math.max(0, sec.start - 0.8); } catch { return; }
+        v.play().catch(() => {});
+        const stopAt = sec.end + 0.6;
+        const stop = () => { if (v.currentTime >= stopAt) { v.pause(); v.removeEventListener('timeupdate', stop); } };
+        v.addEventListener('timeupdate', stop);
+    };
+
     const total = totalOf(segments);
     const dirty = useMemo(() => {
         if (!renderedSegments) return false;
         return JSON.stringify(segments) !== JSON.stringify(renderedSegments)
-            || framing !== renderedFraming || JSON.stringify([censorMode, censorWords]) !== renderedCensor;
-    }, [segments, renderedSegments, playbackSegments, framing, renderedFraming, censorMode, censorWords, renderedCensor]);
+            || framing !== renderedFraming || currentAudioKey !== renderedCensor;
+    }, [segments, renderedSegments, framing, renderedFraming, currentAudioKey, renderedCensor]);
 
     // Trim bounds: with the source gone, cuts must stay inside the range the
     // canonical file was rendered from.
@@ -863,7 +905,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     snap_to_words: false, // boundaries are already word-snapped client-side
                     reapply_captions: reapplyCaptions,
                     censor_mode: censorMode,
-                    censor_words: censorWords.split(",").map(w => w.trim()).filter(Boolean),
+                    censor_words: parseWords(censorWords),
+                    censor_pad_before: censorPadBefore,
+                    censor_pad_after: censorPadAfter,
+                    censor_adjustments: censorAdjustments,
+                    music_mode: musicMode,
+                    music_reduce_db: musicDb,
                     framing,
                 }),
             });
@@ -875,7 +922,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             const data = await res.json();
             setRenderedSegments((data.editor_segments || data.recipe.segments).map((s) => ({ ...s })));
             setPlaybackSegments(data.recipe.segments);
-            setRenderedCensor(JSON.stringify([censorMode, censorWords]));
+            setRenderedCensor(currentAudioKey);
             setRenderedFraming(data.framing || 'auto');
             setFraming(data.framing || 'auto');
             dispatch({ type: 'init', segments: (data.editor_segments || data.recipe.segments).map((s) => ({ ...s })) });
@@ -1496,7 +1543,70 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                 </label>
                                 <p className="text-xs text-muted">Exact words, ignoring case and punctuation. Add variants or words in your language. Uses transcript timing; review the rendered result.</p>
                                 <p className="text-xs text-muted">Bleep replaces caption text with [bleep]. Cut shortens the video and removes those caption words. Applied when you render.</p>
+                                <label className="block readout">Start earlier by {censorPadBefore.toFixed(2)}s
+                                    <input aria-label="Censor lead" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="0.5" step="0.01" value={censorPadBefore} onChange={e => setCensorPadBefore(Number(e.target.value))} />
+                                </label>
+                                <label className="block readout">End later by {censorPadAfter.toFixed(2)}s
+                                    <input aria-label="Censor tail" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="0.5" step="0.01" value={censorPadAfter} onChange={e => setCensorPadAfter(Number(e.target.value))} />
+                                </label>
+                                <div>
+                                    <p className="readout mb-1">{censorMode === 'cut' ? 'Removed' : 'Bleeped'} in this clip ({censorList.filter((c) => !c.skip && !c.tooShort).length})</p>
+                                    {censorList.length === 0 ? (
+                                        <p className="text-xs text-muted">No listed words are spoken in the current segments.</p>
+                                    ) : (
+                                        <ul className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                                            {censorList.map((c) => (
+                                                <li key={c.key} className={`rounded-input border border-rule2 px-2 py-1.5 text-xs ${c.skip ? 'opacity-50' : ''}`}>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="text-ink2">
+                                                            <span className="font-mono">{fmtClock(c.clipStart)}</span>{' '}
+                                                            <span className={c.skip ? 'line-through' : ''}>{c.word}</span>
+                                                            <span className="text-muted"> · {(c.end - c.start).toFixed(2)}s</span>
+                                                        </span>
+                                                        <span className="flex items-center gap-1">
+                                                            {sourceAvailable && <button type="button" className="btn-ghost !px-1.5 !py-0.5" onClick={() => playSection(c)} title="Play this section on the source monitor">play</button>}
+                                                            <label className="flex items-center gap-1 text-muted"><input type="checkbox" checked={!c.skip} onChange={e => setCensorAdjustments((a) => adjust(a, c.key, 'skip', !e.target.checked))} aria-label={`Censor ${c.word} at ${fmtClock(c.clipStart)}`} />on</label>
+                                                        </span>
+                                                    </div>
+                                                    {!c.skip && (
+                                                        <div className="mt-1 grid grid-cols-2 gap-2 text-muted">
+                                                            <span className="flex items-center gap-1">start
+                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'before', 0.05)} aria-label="Start earlier">◀</button>
+                                                                <span className="font-mono">{fmtNudge(-c.before)}</span>
+                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'before', -0.05)} aria-label="Start later">▶</button>
+                                                            </span>
+                                                            <span className="flex items-center gap-1">end
+                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'after', -0.05)} aria-label="End earlier">◀</button>
+                                                                <span className="font-mono">{fmtNudge(c.after)}</span>
+                                                                <button type="button" className="btn-ghost !px-1 !py-0" onClick={() => nudge(c.key, 'after', 0.05)} aria-label="End later">▶</button>
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                    {c.tooShort && !c.skip && <p className="text-warn mt-1">Too short to apply — move start earlier or end later.</p>}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    <p className="text-[11px] text-muted mt-1">◀ ▶ move each edge by 0.05s from the padded section. Times are on the edited clip.</p>
+                                </div>
                             </>}
+                        </div>
+
+                        <div className="space-y-2">
+                            <p className="eyebrow">Background music</p>
+                            <select aria-label="Background music" className="input-field" value={musicMode} onChange={e => setMusicMode(e.target.value)}>
+                                <option value="off">Keep original audio</option>
+                                <option value="remove">Remove music (voice only)</option>
+                                <option value="reduce">Turn music down</option>
+                            </select>
+                            {musicMode === 'reduce' && (
+                                <label className="block readout">Music {musicDb} dB quieter
+                                    <input aria-label="Music reduction" className="w-full accent-[var(--color-accent)]" type="range" min="6" max="30" step="1" value={musicDb} onChange={e => setMusicDb(Number(e.target.value))} />
+                                </label>
+                            )}
+                            {musicMode !== 'off' && (
+                                <p className="text-xs text-muted">AI voice separation, applied when you render (about half a minute per minute of clip). Remove also drops crowd noise and room sound; sung vocals stay.</p>
+                            )}
                         </div>
                         {/* framing override */}
                         <div>

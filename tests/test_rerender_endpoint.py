@@ -404,7 +404,8 @@ def test_rerender_keeps_hook_and_cuts_selected_words(job, fake_recut, monkeypatc
     hooks=[]
     monkeypatch.setattr(app_module,'add_hook_to_video',lambda *a,**kw: hooks.append((a,kw)))
     def perform(**kw):
-        assert kw['segments']==[{'start':0.0,'end':10.0},{'start':10.4,'end':30.0}]
+        # The cut starts 0.15 s before and ends 0.05 s after the word (padding).
+        assert kw['segments']==[{'start':0.0,'end':9.85},{'start':10.45,'end':30.0}]
         words=recut.transcript_words(kw['captions_transcript'])
         assert all(w['w']!='world' for w in words)
         kw['overlay'](str(job['dir']/'recut.mp4'))
@@ -418,4 +419,35 @@ def test_rerender_keeps_hook_and_cuts_selected_words(job, fake_recut, monkeypatc
     saved=json.loads(job['meta_path'].read_text())['shorts'][0]
     assert saved['auto_hook']['text']=='Keep this hook'
     assert saved['censorship']['mode']=='cut'
-    assert saved['recipe']['segments']==[{'start':10.0,'end':20.0},{'start':20.4,'end':40.0}]
+    assert saved['recipe']['segments']==[{'start':10.0,'end':19.85},{'start':20.45,'end':40.0}]
+    assert saved['censorship']['sections'][0]['key']=='20.000'
+    assert saved['music_removal']=={'mode':'off','reduce_db':18.0}
+
+
+def test_rerender_applies_music_removal_then_adjusted_bleeps(job, fake_recut, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_module.music_removal, 'process',
+                        lambda path, mode, db: calls.append(('music', mode, db)))
+    monkeypatch.setattr(app_module.word_censor, 'bleep',
+                        lambda path, sections: calls.append(('bleep', sections)))
+    def perform(**kw):
+        kw['audio_processor'](str(job['dir'] / 'recut.mp4'))
+        return 'new.mp4', 'recut.mp4'
+    monkeypatch.setattr(recut, 'perform_recut', perform)
+    response = _request('POST', '/api/clip/rerender', {
+        'job_id': JOB_ID, 'clip_index': 0, 'segments': [{'start': 10, 'end': 40}],
+        'censor_mode': 'bleep', 'censor_words': ['world'], 'censor_pad_before': 0.3,
+        'censor_adjustments': {'20': {'after': 0.25}},
+        'music_mode': 'reduce', 'music_reduce_db': 12})
+    assert response.status_code == 200, response.text
+    # Music first, so the tone is never separated away; the bleep uses the
+    # padded and nudged section on the clip timeline (word 20.0-20.4 s).
+    assert calls == [('music', 'reduce', 12.0), ('bleep', [[9.7, 10.7]])]
+    saved = json.loads(job['meta_path'].read_text())['shorts'][0]
+    assert saved['music_removal'] == {'mode': 'reduce', 'reduce_db': 12.0}
+    assert saved['censorship']['adjustments'] == {'20.000': {'before': 0.0, 'after': 0.25, 'skip': False}}
+    edl = _request('GET', f'/api/clip/{JOB_ID}/0/edl').json()
+    assert edl['music_removal']['mode'] == 'reduce' and edl['censorship']['pad_before'] == 0.3
+    bad = _request('POST', '/api/clip/rerender', {'job_id': JOB_ID, 'clip_index': 0,
+                   'segments': [{'start': 10, 'end': 40}], 'music_mode': 'louder'})
+    assert bad.status_code == 400

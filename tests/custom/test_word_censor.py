@@ -84,7 +84,7 @@ def test_real_bleep_removes_original_frequency_and_keeps_duration(tmp_path):
     path=str(tmp_path/'audio.mp4')
     subprocess.run(['ffmpeg','-v','error','-y','-f','lavfi','-i','color=s=160x240:d=3',
         '-f','lavfi','-i','sine=frequency=440:duration=3','-c:v','libx264','-c:a','aac','-shortest',path],check=True)
-    censor.bleep(path,TRANSCRIPT,['shit'])
+    censor.bleep(path,[[1.0,1.5]])
     raw=subprocess.check_output(['ffmpeg','-v','error','-i',path,'-f','f32le','-ac','1','-ar','48000','-'])
     samples=np.frombuffer(raw,dtype=np.float32)
     assert abs(len(samples)/48000-3)<.1
@@ -94,3 +94,45 @@ def test_real_bleep_removes_original_frequency_and_keeps_duration(tmp_path):
         return abs(np.sum(chunk*np.exp(-2j*np.pi*hz*time))) / len(chunk)
     assert energy(1.1,1.4,1000)>energy(1.1,1.4,440)*20
     assert energy(.2,.8,440)>energy(.2,.8,1000)*20
+
+
+def _settings(**kw):
+    return censor.normalize_settings(kw.pop('mode', 'cut'), kw.pop('words', ['shit']), **kw)
+
+
+def test_sections_start_before_the_transcript_timing_by_default():
+    sections = censor.sections(TRANSCRIPT, _settings(), [{'start': 0, 'end': 3}])
+    # Whisper starts words late: the default lead covers the onset.
+    assert [(s['key'], s['start'], s['end']) for s in sections] == [('1.000', 0.85, 1.55)]
+    segments = censor.cut_segments([{'start': 0, 'end': 3}], sections)
+    assert segments == [{'start': 0, 'end': 0.85}, {'start': 1.55, 'end': 3}]
+
+
+def test_per_word_nudges_skip_and_clamping_to_the_segment():
+    nudged = _settings(pad_before=0.1, pad_after=0,
+                       adjustments={'1': {'before': 0.2, 'after': -0.1}})
+    assert nudged['adjustments'] == {'1.000': {'before': 0.2, 'after': -0.1, 'skip': False}}
+    [section] = censor.sections(TRANSCRIPT, nudged, [{'start': 0, 'end': 3}])
+    assert (section['start'], section['end']) == (0.7, 1.4)
+    # A section never reaches outside the segment holding the word.
+    [clamped] = censor.sections(TRANSCRIPT, _settings(pad_before=1), [{'start': 0.9, 'end': 3}])
+    assert clamped['start'] == 0.9
+    skipped = _settings(adjustments={'1.000': {'skip': True}})
+    assert censor.sections(TRANSCRIPT, skipped, [{'start': 0, 'end': 3}]) == []
+    with pytest.raises(ValueError):
+        _settings(mode='mute')
+
+
+def test_bleep_sections_map_to_clip_time_and_skipped_words_keep_their_caption():
+    two = {'segments': [{'start': 0, 'end': 6, 'words': [
+        {'word': ' shit', 'start': 1, 'end': 1.5}, {'word': ' shit', 'start': 5, 'end': 5.5}]}]}
+    settings = _settings(mode='bleep', pad_before=0, pad_after=0,
+                         adjustments={'5.000': {'skip': True}})
+    segments = [{'start': 4, 'end': 6}, {'start': 0, 'end': 2}]
+    sections = censor.sections(two, settings, segments)
+    assert [s['key'] for s in sections] == ['1.000']
+    settings['clip_sections'] = censor.to_clip_time(sections, segments)
+    assert settings['clip_sections'] == [[3.0, 3.5]]   # 2 s into the second segment
+    captions = censor.censor_transcript(recut.virtual_transcript(two, segments), settings)
+    assert [w['w'] for w in recut.transcript_words(captions)] == ['shit', '[bleep]']
+    assert censor.clip_sections_for(two, settings, segments) == [[3.0, 3.5]]

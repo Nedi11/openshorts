@@ -20,7 +20,7 @@ RUN pip install --upgrade pip
 ARG GPU=0
 RUN if [ "$GPU" != "1" ]; then \
       pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-        torch==2.11.0 torchvision==0.26.0; \
+        torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0; \
     fi
 RUN pip install --no-cache-dir -r requirements.txt
 # Cloud (paid mode) deps: installed always so one image serves both modes; they
@@ -136,15 +136,19 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuse
 # Create directories including Ultralytics cache config. /app/.cache/huggingface
 # exists in-image (appuser-owned via the chown below) so a persistent volume
 # mounted there inherits writable ownership for the ASR model downloads.
-RUN mkdir -p /app/uploads /app/output /app/.cache/huggingface /tmp/Ultralytics
-# Fix permissions: /app for code/uploads, /tmp/Ultralytics for AI cache
-RUN chown -R appuser:appuser /app /tmp/Ultralytics
+RUN mkdir -p /app/uploads /app/output /app/.cache/huggingface /tmp/Ultralytics /opt/demucs
+# Fix permissions: /app for code/uploads, /tmp/Ultralytics for AI cache,
+# /opt/demucs for the music-removal weights (outside the /app/.cache volume,
+# which would hide anything baked into the image there).
+RUN chown -R appuser:appuser /app /tmp/Ultralytics /opt/demucs
 
 # Switch to non-root user
 USER appuser
 
 # Pre-download YOLO model on build (now running as appuser)
 RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt'); YOLO('yolov8s.pt')"
+# Music removal weights (Demucs htdemucs, ~80 MB, MIT): music_removal.MODEL_DIR.
+RUN python -c "import music_removal; music_removal.load_model()"
 
 # Expose FastAPI port
 EXPOSE 8000

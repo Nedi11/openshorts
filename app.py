@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
 import recut
 import word_censor
+import music_removal
 import layout_ranges
 import watermarked
 import media_auth
@@ -4906,6 +4907,7 @@ async def get_clip_edl(job_id: str, clip_index: int, request: Request):
         "segments": segments,
         "rendered_segments": (clip.get("recipe") or {}).get("segments") or segments,
         "censorship": clip.get("censorship") or {"mode": "off", "words": word_censor.DEFAULT_WORDS},
+        "music_removal": clip.get("music_removal") or {"mode": "off", "reduce_db": music_removal.DEFAULT_REDUCE_DB},
         "framing": (clip.get('recipe') or {}).get('framing') or 'auto',
         "canonical_range": canonical_range,
         "duration": total,
@@ -4933,6 +4935,20 @@ class RerenderSegment(BaseModel):
     end: float
 
 
+def _audio_processor(music, clip_sections):
+    """recut's audio_processor: music removal first, then bleeps, so the bleep
+    tone is never separated away. None when there is nothing to do."""
+    mode = (music or {}).get('mode', 'off')
+    if mode == 'off' and not clip_sections:
+        return None
+    def process(path):
+        if mode != 'off':
+            music_removal.process(path, mode, (music or {}).get('reduce_db', music_removal.DEFAULT_REDUCE_DB))
+        if clip_sections:
+            word_censor.bleep(path, clip_sections)
+    return process
+
+
 class RerenderRequest(BaseModel):
     job_id: str
     clip_index: int
@@ -4944,6 +4960,14 @@ class RerenderRequest(BaseModel):
     framing: Optional[str] = None
     censor_mode: str = "off"
     censor_words: List[str] = Field(default_factory=lambda: list(word_censor.DEFAULT_WORDS), max_length=200)
+    # Seconds added before/after every censored word, and per-word nudges keyed
+    # by the word's source start time ({"12.340": {"before", "after", "skip"}}).
+    censor_pad_before: float = Field(default=word_censor.PAD_BEFORE, ge=0, le=word_censor.MAX_PAD)
+    censor_pad_after: float = Field(default=word_censor.PAD_AFTER, ge=0, le=word_censor.MAX_PAD)
+    censor_adjustments: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    # Background music: off | remove | reduce (music_removal.py).
+    music_mode: str = "off"
+    music_reduce_db: float = music_removal.DEFAULT_REDUCE_DB
 
 
 # Manual framing -> reframe-engine strategy. 'full' shows the whole source
@@ -5041,20 +5065,23 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
     except recut.RecutError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if req.censor_mode not in ('off', 'bleep', 'cut'):
-        raise HTTPException(400, 'Choose off, bleep, or cut for word censorship')
-    if any(len(w) > 80 or len(w.split()) != 1 for w in req.censor_words):
-        raise HTTPException(400, 'Enter individual words, separated by commas')
     original_segments = [dict(s) for s in segments]
-    censorship = {'mode': req.censor_mode, 'words': req.censor_words,
-                  'original_segments': original_segments}
-    if req.censor_mode == 'cut':
-        try:
-            segments = word_censor.cut_segments(segments, word_censor.matches(transcript, req.censor_words))
-        except ValueError as error:
-            raise HTTPException(400, str(error))
+    try:
+        censorship = word_censor.normalize_settings(
+            req.censor_mode, req.censor_words, req.censor_pad_before,
+            req.censor_pad_after, req.censor_adjustments)
+        music = music_removal.normalize_settings(req.music_mode, req.music_reduce_db)
+        censor_sections = word_censor.sections(transcript, censorship, segments)
+        if req.censor_mode == 'cut':
+            segments = word_censor.cut_segments(segments, censor_sections)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    censorship['original_segments'] = original_segments
+    censorship['sections'] = censor_sections
+    if req.censor_mode == 'bleep':
+        censorship['clip_sections'] = word_censor.to_clip_time(censor_sections, segments)
     uncensored_virtual = recut.virtual_transcript(transcript, segments)
-    audio_processor = (lambda path: word_censor.bleep(path, uncensored_virtual, req.censor_words)) if req.censor_mode == 'bleep' else None
+    audio_processor = _audio_processor(music, censorship.get('clip_sections'))
 
     # A framing override always re-reframes from the source: the canonical file
     # has the old layout baked into its pixels.
@@ -5117,6 +5144,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
 
         updates = {'video_url': new_video_url, 'start': new_start,
                    'end': new_end, 'recipe': new_recipe, 'censorship': censorship,
+                   'music_removal': music,
                    # The stacked stretches of THIS render (empty on the fast
                    # path, which never reframes): captions follow them.
                    'layout_ranges': layout_ranges.read(
@@ -5151,6 +5179,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
             "duration": total,
             "editor_segments": original_segments,
             "censorship": censorship,
+            "music_removal": music,
             "render_path": "fast" if fast else "source",
         }
     except Exception as e:
@@ -5462,8 +5491,9 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
     clean_name = f"{base_name}_clip_{req.clip_index + 1}.mp4"
 
     censorship = clip.get('censorship') or {}
-    uncensored_virtual = recut.virtual_transcript(data.get('transcript') or {}, segments)
-    audio_processor = (lambda path: word_censor.bleep(path, uncensored_virtual, censorship.get('words', []))) if censorship.get('mode') == 'bleep' else None
+    audio_processor = _audio_processor(
+        clip.get('music_removal'),
+        word_censor.clip_sections_for(data.get('transcript') or {}, censorship, segments))
     v_transcript = word_censor.censor_transcript(v_transcript, censorship) if v_transcript else None
 
     def run():

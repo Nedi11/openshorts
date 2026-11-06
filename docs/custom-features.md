@@ -146,3 +146,31 @@ YOLO_MODEL_PATH=yolov8n.pt restores the previous tracker exactly. Benchmarked
 cost before PERF-001: about 2-4 s per 60 s clip. Speaker detection from mouth
 motion (SPEAKER_SIGNAL) remains off. Tests: tests/custom/test_tracking_defaults.py
 (fresh-interpreter import checks; skipped without the ML stack).
+
+AUDIO-001 update (implemented): each matched word becomes a section starting
+`pad_before` (default 0.15 s) before and ending `pad_after` (default 0.05 s)
+after its transcript timing, since Whisper tends to start words after their
+sound does. The editor lists every matched word in the current segments with its
+clip time and length; each edge can be nudged in 0.05 s steps, a word can be
+skipped, and a section can be played on the source monitor. Nudges are keyed by
+the word's source start time and saved. Sections clamp to the segment holding
+the word. The render records the final source sections (and clip-time sections
+for bleep), and captions show [bleep] only inside those, so skipped words keep
+their text. dashboard/src/lib/censorSections.js mirrors word_censor.sections.
+Tests: tests/custom/test_word_censor.py, tests/test_rerender_endpoint.py,
+dashboard/tests/censorSections.test.cjs.
+
+AUDIO-002 (implemented): editor offers background music Keep / Remove (voice
+only) / Turn down (6–30 dB, default 18). Demucs htdemucs (MIT) separates the
+rendered clip's audio; the voice stem is kept and the rest (original minus
+voice) is dropped or attenuated. The video stream is copied. Runs before bleeps,
+so the tone survives. Saved per clip (music_removal) and re-applied on manual
+reframe. Weights are baked into the image at /opt/demucs (outside the
+/app/.cache volume); torchaudio comes from the CPU index. Cost: about 27 s per
+60 s clip on a Ryzen 7 5700G CPU. A cancel takes effect after separation (it
+runs in-process). Sung vocals stay; Remove also drops crowd and room sound.
+Implementation: music_removal.py, app.py _audio_processor, ClipEditor.jsx,
+Dockerfile, requirements.txt. Tests: tests/custom/test_music_removal.py,
+tests/test_rerender_endpoint.py. Manual acceptance: a 60 s section of a real
+video separated into a voice track (223 transcribed words, level unchanged) and
+a residual about 13 dB lower containing no transcribable speech.
