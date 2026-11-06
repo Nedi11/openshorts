@@ -12,6 +12,7 @@ export type SubtitleAnimation = "none" | "word-highlight" | "pop" | "karaoke";
 export type SubtitlePosition = "top" | "middle" | "bottom";
 
 export interface SubtitleStyle {
+  bold?: boolean;
   fontFamily: string;
   fontSize: number;
   fontColor: string;

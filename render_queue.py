@@ -12,6 +12,7 @@ import weakref
 from fastapi import HTTPException
 from jsonfile import write_json_atomic
 import json
+from render_cancel import Token, current, RenderCancelled
 
 
 class RenderQueue:
@@ -21,11 +22,13 @@ class RenderQueue:
         self.revision = revision
         self.semaphores = weakref.WeakKeyDictionary()
         self.tasks = set()
+        self.tokens = {}
+        self.by_id = {}
         self.persistence_error = None
         self.records = self.load_history()
         recovered = False
         for record in self.records:
-            if record['state'] in ('queued', 'running'):
+            if record['state'] in ('queued', 'running', 'cancelling'):
                 record.update(state='failed', error='Backend restarted before this render completed', finished_at=time.time())
                 recovered = True
         self.prune_history()
@@ -47,7 +50,7 @@ class RenderQueue:
             identifier = record.get('id')
             created = record.get('created_at')
             if (not isinstance(identifier, str) or not identifier or identifier in identifiers
-                    or record.get('state') not in ('queued', 'running', 'completed', 'failed')
+                    or record.get('state') not in ('queued', 'running', 'cancelling', 'cancelled', 'completed', 'failed')
                     or type(created) not in (int, float) or abs(created) > 1e12 or not math.isfinite(created)):
                 continue
             if not isinstance(record.get('job_id'), str) or not isinstance(record.get('operation'), str):
@@ -59,7 +62,7 @@ class RenderQueue:
                 value = record.get(field)
                 if field in record and (type(value) not in (int, float) or abs(value) > 1e12 or not math.isfinite(value)):
                     record.pop(field)
-            if record['state'] in ('completed', 'failed'):
+            if record['state'] in ('completed', 'failed', 'cancelled'):
                 record.setdefault('finished_at', record.get('started_at', created))
             record['error'] = str(record.get('error') or '')
             identifiers.add(identifier)
@@ -69,9 +72,9 @@ class RenderQueue:
         return records
 
     def prune_history(self):
-        active = [record for record in self.records if record['state'] in ('queued', 'running')]
+        active = [record for record in self.records if record['state'] in ('queued', 'running', 'cancelling')]
         completed = sorted(
-            (record for record in self.records if record['state'] not in ('queued', 'running')),
+            (record for record in self.records if record['state'] not in ('queued', 'running', 'cancelling')),
             key=lambda record: record.get('finished_at', record['created_at']))
         self.records = active + completed[-50:]
 
@@ -96,6 +99,21 @@ class RenderQueue:
             result.append(item)
         return result
 
+    def cancel(self, identifier):
+        record = next((r for r in self.records if r['id'] == identifier), None)
+        if record is None:
+            raise HTTPException(404, 'Render not found')
+        token = self.tokens.get(identifier)
+        if token and record['state'] in ('queued', 'running', 'cancelling'):
+            token.cancel()
+            if record["state"] == "queued" and identifier in self.by_id:
+                self.by_id[identifier].cancel()
+            record['state'] = 'cancelled' if record['state'] == 'queued' else 'cancelling'
+            if record['state'] == 'cancelled':
+                record['finished_at'] = time.time()
+            self.save()
+        return dict(record)
+
     def track(self, label):
         def decorate(function):
             signature = inspect.signature(function)
@@ -119,35 +137,54 @@ class RenderQueue:
                 loop = asyncio.get_running_loop()
                 semaphore = self.semaphores.setdefault(loop, asyncio.Semaphore(1))
 
+                token = Token()
+                self.tokens[record["id"]] = token
+
                 async def execute():
+                    context_key = current.set(token)
                     try:
                         async with semaphore:
+                            token.check()
                             if expected_revision is not None and self.revision(request) != expected_revision:
                                 raise HTTPException(409, 'This clip changed while the edit was queued. Reopen it before applying this edit.')
                             record.update(state='running', started_at=time.time())
                             self.save()
                             result = await function(*args, **kwargs)
+                            token.check()
                             record.update(state='completed', finished_at=time.time())
                             self.prune_history()
                             self.save()
                             return result
                     except BaseException as error:
                         detail = error.detail if isinstance(error, HTTPException) else 'Render failed. See backend logs.'
-                        record.update(state='failed', error=str(detail), finished_at=time.time())
+                        record.update(state='cancelled' if token.cancelled else 'failed', error='Render cancelled' if token.cancelled else str(detail), finished_at=time.time())
                         self.prune_history()
                         self.save()
+                        if token.cancelled:
+                            raise HTTPException(409, "Render cancelled") from error
                         raise
+                    finally:
+                        current.reset(context_key)
+                        self.tokens.pop(record["id"], None)
 
                 task = asyncio.create_task(execute())
                 self.tasks.add(task)
+                self.by_id[record["id"]] = task
 
                 def finished(done):
                     self.tasks.discard(done)
+                    self.by_id.pop(record["id"], None)
+                    self.tokens.pop(record["id"], None)
                     if not done.cancelled():
                         done.exception()  # consume failures even if the browser disconnected
 
                 task.add_done_callback(finished)
-                return await asyncio.shield(task)
+                try:
+                    return await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    if token.cancelled:
+                        raise HTTPException(409, "Render cancelled")
+                    raise
 
             return wrapped
         return decorate

@@ -266,7 +266,7 @@ def perform_recut(*, input_path, segments, output_dir, clean_name,
                   reframe=False, output_format="auto", watermark=False,
                   captions_transcript=None, force_strategy=None,
                   crop_overrides=None, runner=None, renderer=None,
-                  watermarker=None, captioner=None, subtitle_band=None):
+                  watermarker=None, captioner=None, subtitle_band=None, audio_processor=None, overlay=None):
     """Render a recut clip. Returns (served_filename, clean_filename).
 
     - ``input_path``/``segments``: the file to cut from and the times ON THAT
@@ -322,13 +322,18 @@ def perform_recut(*, input_path, segments, output_dir, clean_name,
                 (r["start"], r["end"], r["layout"], r.get("content"))
                 for r in layout_ranges.remap(layout_ranges.read(input_path), segments)])
 
+        if audio_processor:
+            audio_processor(out_path)
+
         if watermark:
             (watermarker or _main_attr("apply_watermark"))(out_path)
 
         served_name = out_name
+        overlay_path = overlay(out_path) if overlay else out_path
+        served_name = os.path.basename(overlay_path)
         if captions_transcript and captions_transcript.get("segments"):
             caption = captioner or _main_attr("auto_caption_clip")
-            captioned = caption(out_path, captions_transcript,
+            captioned = caption(overlay_path, captions_transcript,
                                 0.0, total_duration(segments))
             if captioned:
                 served_name = os.path.basename(captioned)

@@ -355,7 +355,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                  highlight_color="#FFD700", bg_color="#000000", bg_opacity=0.0,
                  effect="none", base_opacity=1.0, uppercase=False,
                  margin_v=SAFE_MARGIN_V, split_ranges=None,
-                 reveal=False, shadow=0, horizontal_padding=6.17):
+                 reveal=False, shadow=0, horizontal_padding=6.17, bold=True, highlight_enabled=True):
     """
     Generates a karaoke-style ASS file: each block is shown like the SRT path,
     but the currently spoken word is rendered in highlight_color (modern
@@ -398,6 +398,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     def seam_prefix(t):
         return "{\\an5}" if any(a <= t < b for a, b in seam_ranges) else ""
 
+    if not highlight_enabled:
+        highlight_color, effect, base_opacity = font_color, "none", 1.0
     safe_font = _sanitize_font_name(font_name)
     base_opacity = _clamp_number(base_opacity, 0.05, 1.0, 1.0)
     # Dim inactive words via a fully-opaque scaled color (NOT alpha — see
@@ -454,7 +456,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         active_style = (
             f"Style: Active,{safe_font},{final_fontsize},"
             f"{hex_to_ass_color(on_box, 1.0)},{hex_to_ass_color(on_box, 1.0)},"
-            f"{box_colour},{box_colour},1,0,0,0,100,100,0,0,3,{pad},0,"
+            f"{box_colour},{box_colour},{int(bool(bold))},0,0,0,100,100,0,0,3,{pad},0,"
             f"{ass_alignment},{margin_h},{margin_h},{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         )
 
@@ -471,7 +473,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{safe_font},{final_fontsize},{primary_colour},{primary_colour},"
-        f"{outline_colour},{back_colour},1,0,0,0,100,100,0,0,{border_style},"
+        f"{outline_colour},{back_colour},{int(bool(bold))},0,0,0,100,100,0,0,{border_style},"
         f"{outline_width},{shadow},{ass_alignment},{margin_h},{margin_h},{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         f"{active_style}"
         "\n"
@@ -573,7 +575,7 @@ def _sanitize_font_name(name):
 def subtitles_filter(srt_path, alignment=2, fontsize=16,
                      font_name="Verdana", font_color="#FFFFFF",
                      border_color="#000000", border_width=2,
-                     bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17):
+                     bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17, bold=True, highlight_enabled=True):
     """The -vf string burn_subtitles uses (also fed to hooks.add_hook_to_video)."""
     # Position mapping
     ass_alignment = 2
@@ -625,7 +627,7 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         f"MarginV={SAFE_MARGIN_V},"
         f"MarginL={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
         f"MarginR={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
-        f"Bold=1"
+        f"Bold={int(bool(bold))}"
     )
 
     # Let libass see the fonts bundled with the app (e.g. Anton for Impact)
@@ -664,7 +666,7 @@ def _video_size(path):
 def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
                    font_name="Verdana", font_color="#FFFFFF",
                    border_color="#000000", border_width=2,
-                   bg_color="#000000", bg_opacity=0.0, mark=None, horizontal_padding=6.17):
+                   bg_color="#000000", bg_opacity=0.0, mark=None, horizontal_padding=6.17, bold=True, highlight_enabled=True):
     """
     Burns subtitles into the video using FFmpeg.
     Supports two modes:
@@ -676,7 +678,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     main.mark_delivery), from the same decode. ``make_filter(vw, vh, video=,
     logo=, out=)`` is main.watermark_filter.
     """
-    vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize, horizontal_padding=horizontal_padding,
+    vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize, horizontal_padding=horizontal_padding, bold=bold,
                           font_name=font_name, font_color=font_color,
                           border_color=border_color, border_width=border_width,
                           bg_color=bg_color, bg_opacity=bg_opacity)

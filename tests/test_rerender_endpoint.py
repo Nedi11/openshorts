@@ -395,3 +395,27 @@ def test_queued_edit_cannot_overwrite_a_newer_clip(job, fake_recut, monkeypatch)
             assert 'changed while' in response.json()['detail']
     asyncio.run(exercise())
     assert len(fake_recut) == 1
+
+
+def test_rerender_keeps_hook_and_cuts_selected_words(job, fake_recut, monkeypatch):
+    meta=json.loads(job['meta_path'].read_text())
+    meta['shorts'][0]['auto_hook']={'text':'Keep this hook','style':'pill','duration_seconds':4}
+    job['meta_path'].write_text(json.dumps(meta))
+    hooks=[]
+    monkeypatch.setattr(app_module,'add_hook_to_video',lambda *a,**kw: hooks.append((a,kw)))
+    def perform(**kw):
+        assert kw['segments']==[{'start':0.0,'end':10.0},{'start':10.4,'end':30.0}]
+        words=recut.transcript_words(kw['captions_transcript'])
+        assert all(w['w']!='world' for w in words)
+        kw['overlay'](str(job['dir']/'recut.mp4'))
+        return 'new.mp4','recut.mp4'
+    monkeypatch.setattr(recut,'perform_recut',perform)
+    response=_request('POST','/api/clip/rerender',{'job_id':JOB_ID,'clip_index':0,
+        'segments':[{'start':10,'end':40}],'censor_mode':'cut','censor_words':['world']})
+    assert response.status_code==200,response.text
+    assert hooks[0][0][1]=='Keep this hook'
+    assert hooks[0][1]['duration']==4
+    saved=json.loads(job['meta_path'].read_text())['shorts'][0]
+    assert saved['auto_hook']['text']=='Keep this hook'
+    assert saved['censorship']['mode']=='cut'
+    assert saved['recipe']['segments']==[{'start':10.0,'end':20.0},{'start':20.4,'end':40.0}]

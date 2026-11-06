@@ -115,3 +115,15 @@ def test_caption_padding_small_size_and_stroke_without_shadow(tmp_path):
     classic = subtitles_filter('caption.srt', horizontal_padding=20, fontsize=8)
     assert 'MarginL=77,MarginR=77' in classic
     assert 'Fontsize=6,' in classic
+
+
+def test_caption_highlight_can_be_disabled_and_regular_weight_selected(tmp_path):
+    transcript={'segments':[{'start':0,'end':1,'words':[{'word':'Hello','start':0,'end':1}]}]}
+    path=tmp_path/'regular.ass'
+    generate_ass(transcript,0,1,str(path),highlight_enabled=False,bold=False,
+                 effect='highlight',highlight_color='#FF0000')
+    content=path.read_text()
+    style=next(l for l in content.splitlines() if l.startswith('Style: Default')).split(',')
+    assert style[7]=='0'
+    assert 'Style: Active' not in content
+    assert '&H0000FF&' not in content

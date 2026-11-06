@@ -106,9 +106,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const [reapplyCaptions, setReapplyCaptions] = useState(true);
     // Framing override: 'auto' (classifier) | 'full' (whole frame) | 'track'.
     const [framing, setFraming] = useState('auto');
+    const [censorMode, setCensorMode] = useState('off');
+    const [censorWords, setCensorWords] = useState('');
+    const [renderedCensor, setRenderedCensor] = useState('');
     const [renderedFraming, setRenderedFraming] = useState('auto');
     // The recipe of the currently RENDERED preview (playhead maps onto it).
     const [renderedSegments, setRenderedSegments] = useState(null);
+    const [playbackSegments, setPlaybackSegments] = useState(null);
     const [previewUrl, setPreviewUrl] = useState(null);
     const [rendering, setRendering] = useState(false);
     const [renderSeconds, setRenderSeconds] = useState(0);
@@ -186,8 +190,13 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 const data = await apiJson(`/api/clip/${jobId}/${clipIndex}/edl`);
                 if (cancelled) return;
                 setEdl(data);
+                const censorship = data.censorship || {mode:'off', words:[]};
+                setCensorMode(censorship.mode);
+                setCensorWords(censorship.words.join(', '));
+                setRenderedCensor(JSON.stringify([censorship.mode, censorship.words.join(', ')]));
                 dispatch({ type: 'init', segments: data.segments.map((s) => ({ ...s })) });
                 setRenderedSegments(data.segments.map((s) => ({ ...s })));
+                setPlaybackSegments(data.rendered_segments || data.segments);
                 setFraming(data.framing || 'auto');
                 setRenderedFraming(data.framing || 'auto');
                 setReapplyCaptions(true);
@@ -215,8 +224,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
     const dirty = useMemo(() => {
         if (!renderedSegments) return false;
         return JSON.stringify(segments) !== JSON.stringify(renderedSegments)
-            || framing !== renderedFraming;
-    }, [segments, renderedSegments, framing, renderedFraming]);
+            || framing !== renderedFraming || JSON.stringify([censorMode, censorWords]) !== renderedCensor;
+    }, [segments, renderedSegments, playbackSegments, framing, renderedFraming, censorMode, censorWords, renderedCensor]);
 
     // Trim bounds: with the source gone, cuts must stay inside the range the
     // canonical file was rendered from.
@@ -458,7 +467,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
         // A framing change invalidates the whole file even where the ranges
         // still line up: the crop baked into those frames is not what will
         // come out.
-        if (!renderedSegments || framing !== renderedFraming) {
+        if (!playbackSegments || framing !== renderedFraming) {
             return [{ start: 0, end: totalOf(segments), rendered: null }];
         }
         const spans = [];
@@ -469,7 +478,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             // into the file each overlap lands.
             const pieces = [];
             let renAcc = 0;
-            for (const r of renderedSegments) {
+            for (const r of playbackSegments) {
                 const lo = Math.max(seg.start, r.start);
                 const hi = Math.min(seg.end, r.end);
                 if (hi - lo > COVERAGE_EPSILON) {
@@ -509,7 +518,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
             clipAcc += segLen;
         }
         return spans;
-    }, [segments, renderedSegments, framing, renderedFraming]);
+    }, [segments, renderedSegments, playbackSegments, framing, renderedFraming, censorMode, censorWords, renderedCensor]);
 
     const missingSeconds = useMemo(() => coverage.reduce(
         (acc, sp) => (sp.rendered === null ? acc + (sp.end - sp.start) : acc), 0), [coverage]);
@@ -853,6 +862,8 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                     segments: segments.map((s) => ({ start: s.start, end: s.end })),
                     snap_to_words: false, // boundaries are already word-snapped client-side
                     reapply_captions: reapplyCaptions,
+                    censor_mode: censorMode,
+                    censor_words: censorWords.split(",").map(w => w.trim()).filter(Boolean),
                     framing,
                 }),
             });
@@ -862,10 +873,12 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                 throw new Error(detail);
             }
             const data = await res.json();
-            setRenderedSegments(data.recipe.segments.map((s) => ({ ...s })));
+            setRenderedSegments((data.editor_segments || data.recipe.segments).map((s) => ({ ...s })));
+            setPlaybackSegments(data.recipe.segments);
+            setRenderedCensor(JSON.stringify([censorMode, censorWords]));
             setRenderedFraming(data.framing || 'auto');
             setFraming(data.framing || 'auto');
-            dispatch({ type: 'init', segments: data.recipe.segments.map((s) => ({ ...s })) });
+            dispatch({ type: 'init', segments: (data.editor_segments || data.recipe.segments).map((s) => ({ ...s })) });
             setPreviewUrl(withParam(getApiUrl(data.new_video_url), 't', Date.now()));
             onRerendered?.(clipIndex, data);
             refreshMe();
@@ -1470,6 +1483,21 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                             )}
                         </div>
 
+                        <div className="space-y-2">
+                            <p className="eyebrow">Bad words</p>
+                            <select aria-label="Bad word handling" className="input-field" value={censorMode} onChange={e => setCensorMode(e.target.value)}>
+                                <option value="off">Off — keep original</option>
+                                <option value="bleep">Mute word + bleep tone</option>
+                                <option value="cut">Cut word from video and captions</option>
+                            </select>
+                            {censorMode !== 'off' && <>
+                                <label className="readout">Words to remove (comma separated)
+                                    <textarea aria-label="Words to censor" className="input-field" rows={3} value={censorWords} onChange={e => setCensorWords(e.target.value)} />
+                                </label>
+                                <p className="text-xs text-muted">Exact words, ignoring case and punctuation. Add variants or words in your language. Uses transcript timing; review the rendered result.</p>
+                                <p className="text-xs text-muted">Bleep replaces caption text with [bleep]. Cut shortens the video and removes those caption words. Applied when you render.</p>
+                            </>}
+                        </div>
                         {/* framing override */}
                         <div>
                             <p className="eyebrow mb-2">Framing</p>

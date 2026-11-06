@@ -33,7 +33,7 @@ before(async () => {
       builder.onLoad({ filter: /\/lib\/api\.js$/ }, () => ({ contents:
         'export const apiFetch = (...args) => globalThis.queueTestFetch(...args);' }));
       builder.onLoad({ filter: /\/lib\/browserRenderQueue\.js$/ }, () => ({ contents:
-        'export const subscribeBrowserRenders = listener => globalThis.queueTestSubscribe(listener);' }));
+        'export const cancelBrowserRender = id => globalThis.queueTestCancel?.(id); export const subscribeBrowserRenders = listener => globalThis.queueTestSubscribe(listener);' }));
     } }],
   });
   RenderQueue = require(outfile).default;
@@ -109,6 +109,7 @@ test('poll failure marks stale server state and reconnect restores live status',
     return { ok: true, json: async () => ({ renders: [render] }) };
   };
   await mount();
+  await act(async () => container.querySelector("button").click());
   assert.match(container.textContent, /1 running/);
   unavailable = true;
   await tick(context, 2000);
@@ -126,6 +127,7 @@ test('browser elapsed time advances when the server is unavailable and collapse 
   context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 100000 });
   global.queueTestFetch = async () => { throw new Error('offline'); };
   await mount();
+  await act(async () => container.querySelector("button").click());
   const browser = { ...row('browser-1'), progress: 20 };
   await act(async () => browserListener([browser]));
   assert.match(container.textContent, /0m 0s/);
@@ -146,6 +148,7 @@ test('stalled poll times out, retries and aborts pending requests on unmount', a
     return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
   };
   await mount();
+  await act(async () => container.querySelector("button").click());
   await tick(context, 10000);
   assert.equal(signals[0].aborted, true);
   assert.match(container.textContent, /Server unavailable/);
@@ -172,6 +175,7 @@ test('queued positions, clip numbers and storage warnings are visible', async ()
     warning: 'Render history could not be saved.',
   }) });
   await mount();
+  await act(async () => container.querySelector("button").click());
   assert.match(container.textContent, /clip 3/);
   assert.match(container.textContent, /Queued · position 2/);
   assert.match(container.textContent, /Render history could not be saved/);
@@ -204,4 +208,17 @@ test('overlapping card edits cannot mutate layers while an export is pending', a
   assert.equal(requests.length, 2);
   assert.deepEqual(requests[1].subtitles, { captions: [] });
   await act(async () => { release('blob:hook'); await hook; });
+});
+
+test('new renders never expand the collapsed queue', async () => {
+  await mount();
+  const toggle = container.querySelector('button');
+  await act(async () => browserListener([row('browser-new')]));
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  await act(async () => toggle.click());
+  let cancelled;
+  global.queueTestCancel = id => { cancelled=id; };
+  await act(async () => [...container.querySelectorAll('button')].find(b=>b.textContent==='Cancel render').click());
+  assert.equal(cancelled,'browser-new');
+  delete global.queueTestCancel;
 });
