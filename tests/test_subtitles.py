@@ -430,6 +430,8 @@ class TestBurnWithMark:
     def test_without_mark_the_command_is_unchanged(self, monkeypatch, tmp_path):
         import subtitles as m
         captured = {}
+        # burn_subtitles probes the frame size for the caption grid (play_res_x).
+        monkeypatch.setattr(m, "_video_size", lambda path: (1080, 1920))
         monkeypatch.setattr(m.subprocess, "run",
                             lambda cmd, **kw: captured.setdefault("cmd", cmd) and
                             subprocess.CompletedProcess(cmd, 0, b"", b""))

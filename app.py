@@ -1228,8 +1228,11 @@ def _words_transcript(words, language="en"):
     }
 
 
-def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges=None):
-    """Write the saved caption file without encoding video; return its normalized style."""
+def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges=None,
+                           video_size=None):
+    """Write the saved caption file without encoding video; return its normalized style.
+
+    ``video_size`` is the frame the captions go on (subtitles.play_res_x)."""
     s = {k: SubtitleRequest.model_fields[k].default for k in CAPTION_STYLE_FIELDS}
     s.update({k: v for k, v in (style or {}).items() if k in s})
     max_chars = (max(1, min(40, int(s["max_chars"])))
@@ -1247,7 +1250,7 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
             base_opacity=s["base_opacity"], uppercase=s["uppercase"],
             reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"],
             position_y=s["position_y"], shadow_angle=s["shadow_angle"], shadow_blur=s["shadow_blur"],
-            shadow_color=s["shadow_color"], shadow_opacity=s["shadow_opacity"])
+            shadow_color=s["shadow_color"], shadow_opacity=s["shadow_opacity"], video_size=video_size)
         if max_chars is not None:
             opts["max_chars"] = max_chars
         if max_duration is not None:
@@ -1264,7 +1267,8 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
 def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
                         style, split_ranges=None):
     """Write and burn saved captions. Return False when there are no words."""
-    s = _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges)
+    s = _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges,
+                               _subtitle_video_size(video_path))
     if s is None:
         return False
     burn_subtitles(video_path, sub_path, out_path,
@@ -4519,6 +4523,7 @@ async def _ensure_job_files(job_id: str, request: Request) -> bool:
 
 from editor import VideoEditor
 from subtitles import generate_srt, generate_ass, burn_subtitles, generate_srt_from_video, CAPTION_PRESETS
+from subtitles import _video_size as _subtitle_video_size
 from hooks import add_hook_to_video
 from translate import translate_video, get_supported_languages
 from thumbnail import (analyze_video_for_titles, refine_titles, generate_thumbnail,
@@ -6174,9 +6179,10 @@ async def add_hook(req: HookRequest, request: Request):
                     suffix = 'ass' if saved_style.get('style') == 'karaoke' else 'srt'
                     sub_path = os.path.join(output_dir, f'subs_hook_{uuid.uuid4().hex}.{suffix}')
                     ranges = saved_clip.get('layout_ranges') or layout_ranges.read(input_path)
+                    frame_size = _subtitle_video_size(input_path)
                     style = _prepare_caption_style(
                         sub_path, transcript, start, end, saved_style,
-                        layout_ranges.split_ranges(ranges))
+                        layout_ranges.split_ranges(ranges), frame_size)
                     if style is None:
                         raise RuntimeError('Cannot preserve captions: no words were found for this clip.')
                     vf = subtitles_filter(
@@ -6184,7 +6190,7 @@ async def add_hook(req: HookRequest, request: Request):
                         font_name=style['font_name'], font_color=style['font_color'],
                         border_color=style['border_color'], border_width=style['border_width'],
                         bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'], bold=style['bold'],
-                        position_y=style['position_y'])
+                        position_y=style['position_y'], video_size=frame_size)
                     final_name = f'subtitled_{generation_id}_{output_filename}'
                     also = (vf, os.path.join(output_dir, final_name))
                 add_hook_to_video(

@@ -115,7 +115,8 @@ def test_caption_padding_small_size_and_stroke_without_shadow(tmp_path):
     assert 'xshad' not in path.read_text()
     assert style[19:21] == ['32', '32']
     classic = subtitles_filter('caption.srt', horizontal_padding=20, fontsize=8)
-    assert 'MarginL=77,MarginR=77' in classic
+    # 20% of a 162-unit (9:16) grid: the same 20% of the frame as before.
+    assert 'PlayResX=162,' in classic and 'MarginL=32,MarginR=32' in classic
     assert 'Fontsize=6,' in classic
 
 
