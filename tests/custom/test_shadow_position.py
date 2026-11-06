@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-import hooks
 from subtitles import (custom_margin_v, generate_ass, shadow_layer_tags,
                        subtitles_filter)
 
@@ -55,6 +54,8 @@ def test_custom_caption_position_sets_bottom_margin_for_ass_and_classic(tmp_path
 @pytest.mark.parametrize('x,y,expected', [(0, 0, (0, 0)), (100, 100, (580, 1720)),
                                           (50, 50, (290, 860)), (-5, 900, (0, 1720))])
 def test_custom_hook_position_shares_free_space_and_stays_in_frame(x, y, expected):
+    # The feature-register job has no Pillow; backend-tests runs this for real.
+    hooks = pytest.importorskip('hooks')
     assert hooks.custom_overlay_xy(x, y, 1080, 1920, 500, 200) == expected
 
 
