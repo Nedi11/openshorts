@@ -192,3 +192,13 @@ buttons step by a chosen 0.01 / 0.05 / 0.25 s. Bleep is sample-accurate; Cut
 re-encodes frame-accurately, so the picture moves in whole frames (~0.033 s at
 30 fps) around the cut. Tests: tests/custom/test_word_censor.py,
 dashboard/tests/censorSections.test.cjs (0.07 s section shrunk to 0.02 s).
+
+AUDIO-001 hand-set edges (implemented): the start-earlier / end-later settings
+are presets. They place only the edges of a word the user has not moved. An
+edge moved by hand is saved as an absolute source time (adjustments[key].start
+/ .end) that later preset changes leave alone; the other edge keeps following
+its preset. Move fixes both edges; reset hands them back to the presets. The
+editor labels hand-set edges. Relative before/after offsets saved earlier are
+still read. Tests: tests/custom/test_word_censor.py
+(test_presets_only_place_edges_that_were_not_set_by_hand),
+dashboard/tests/censorSections.test.cjs.

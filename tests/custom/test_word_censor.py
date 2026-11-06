@@ -111,7 +111,8 @@ def test_sections_start_before_the_transcript_timing_by_default():
 def test_per_word_nudges_skip_and_clamping_to_the_segment():
     nudged = _settings(pad_before=0.1, pad_after=0,
                        adjustments={'1': {'before': 0.2, 'after': -0.1}})
-    assert nudged['adjustments'] == {'1.000': {'before': 0.2, 'after': -0.1, 'skip': False}}
+    # Legacy relative offsets (saved before hand-set edges) are still read.
+    assert nudged['adjustments'] == {'1.000': {'before': 0.2, 'after': -0.1}}
     [section] = censor.sections(TRANSCRIPT, nudged, [{'start': 0, 'end': 3}])
     assert (section['start'], section['end']) == (0.7, 1.4)
     # A section never reaches outside the segment holding the word.
@@ -149,10 +150,10 @@ def test_crossed_nudges_are_refused_instead_of_leaving_the_word_in():
 
 
 def test_per_word_adjustments_are_not_limited_to_one_second():
-    settings = _settings(pad_before=0, pad_after=0, adjustments={'1': {'before': 0.9 + 0.6, 'after': 1.25}})
-    assert settings['adjustments']['1.000'] == {'before': 1.5, 'after': 1.25, 'skip': False}
+    settings = _settings(pad_before=0, pad_after=0, adjustments={'1': {'start': -0.5 + 0.5, 'end': 2.75}})
+    assert settings['adjustments']['1.000'] == {'start': 0, 'end': 2.75}
     [section] = censor.sections(TRANSCRIPT, settings, [{'start': 0, 'end': 3}])
-    # 1.5 s earlier is clamped by the segment start, 1.25 s later by nothing.
+    # 1 s before the word and 1.25 s after it: only the segment bounds a section.
     assert (section['start'], section['end']) == (0, 2.75)
 
 
@@ -165,3 +166,16 @@ def test_sections_down_to_a_hundredth_of_a_second_are_applied():
         {'start': 0, 'end': 1.2}, {'start': 1.22, 'end': 3}]
     settings = dict(tiny, mode='bleep')
     assert censor.to_clip_time([section], [{'start': 0, 'end': 3}]) == [[1.2, 1.22]]
+
+
+def test_presets_only_place_edges_that_were_not_set_by_hand():
+    hand = {'1': {'start': 0.75}}                      # start set by hand, end on preset
+    for pad_before, pad_after, end in ((0.15, 0.05, 1.55), (0.5, 0.3, 1.8), (0, 0, 1.5)):
+        [section] = censor.sections(TRANSCRIPT, _settings(pad_before=pad_before, pad_after=pad_after,
+                                                          adjustments=hand), [{'start': 0, 'end': 3}])
+        assert (section['start'], section['end']) == (0.75, end)
+    both = _settings(pad_before=0.9, pad_after=0.9, adjustments={'1': {'start': 1.1, 'end': 1.3}})
+    [section] = censor.sections(TRANSCRIPT, both, [{'start': 0, 'end': 3}])
+    assert (section['start'], section['end']) == (1.1, 1.3)
+    with pytest.raises(ValueError):
+        _settings(adjustments={'1': {'start': 'soon'}})

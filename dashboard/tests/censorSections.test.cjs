@@ -6,28 +6,95 @@ const vm = require('node:vm');
 const result = buildSync({entryPoints:[require('node:path').join(__dirname,'../src/lib/censorSections.js')],bundle:true,write:false,format:'cjs'});
 const sandbox = {module:{exports:{}}};
 vm.runInNewContext(result.outputFiles[0].text, sandbox);
-const {censorSections, adjust, moveEdge, resetWord, normalizeWord, parseWords} = sandbox.module.exports;
+const {censorSections, setSkip, moveEdge, resetWord, normalizeWord, parseWords} = sandbox.module.exports;
 
 // Objects come from the vm sandbox's realm, so compare as JSON.
 const same = (a, b) => assert.equal(JSON.stringify(a), JSON.stringify(b));
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 const WORDS = [{w:'hello',s:0,e:1},{w:'Shit!',s:1,e:1.5},{w:'ship',s:2,e:3}];
+const SEG = [{start:0,end:3}];
+const one = (pb, pa, adj, segs = SEG, words = WORDS) => censorSections(words, ['shit'], segs, pb, pa, adj)[0];
 
 test('default padding starts the section before the transcript timing', () => {
-  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0.15, 0.05, {});
-  assert.deepEqual([sec.key, sec.start, sec.end], ['1.000', 0.85, 1.55]);
+  const sec = one(0.15, 0.05, {});
+  same([sec.key, sec.start, sec.end, sec.manualStart, sec.manualEnd], ['1.000', 0.85, 1.55, false, false]);
 });
 
-test('nudges, clamping and skip mirror the server', () => {
-  let adj = adjust({}, '1.000', 'before', 0.2);
-  adj = adjust(adj, '1.000', 'after', -0.1);
-  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0.1, 0, adj);
-  assert.deepEqual([sec.start, sec.end], [0.7, 1.4]);
-  assert.equal(censorSections(WORDS, ['shit'], [{start:0.9,end:3}], 1, 0.05, {})[0].start, 0.9);
-  const skipped = adjust({}, '1.000', 'skip', true);
-  assert.equal(censorSections(WORDS, ['shit'], [{start:0,end:3}], 0.15, 0.05, skipped)[0].skip, true);
-  // Back to zero drops the entry, so an untouched word sends nothing.
-  same(adjust(adj, '1.000', 'before', 0), {'1.000': {before: 0, after: -0.1, skip: false}});
-  same(adjust(adjust({}, '1.000', 'after', 0.05), '1.000', 'after', 0), {});
+test('hand-set edges keep their time when the presets change; the other edge follows', () => {
+  let sec = one(0.15, 0.05, {});
+  const adj = moveEdge({}, sec, 'start', -0.1);        // start 0.85 -> 0.75, by hand
+  same(adj, {'1.000': {start: 0.75}});
+  sec = one(0.5, 0.3, adj);                             // presets raised afterwards
+  same([sec.start, sec.manualStart, sec.end, sec.manualEnd], [0.75, true, 1.8, false]);
+  sec = one(0, 0, adj);                                 // and lowered
+  same([sec.start, sec.end], [0.75, 1.5]);
+  // Moving the whole section fixes both edges.
+  const moved = moveEdge(adj, one(0, 0, adj), 'move', 0.05);
+  same(moved, {'1.000': {start: 0.8, end: 1.55}});
+  same([one(0.4, 0.4, moved).start, one(0.4, 0.4, moved).end], [0.8, 1.55]);
+});
+
+test('reset and skip', () => {
+  const adj = setSkip(moveEdge({}, one(0.15, 0.05, {}), 'end', 0.25), '1.000', true);
+  same(adj, {'1.000': {end: 1.8, skip: true}});
+  same(resetWord(adj, '1.000'), {'1.000': {skip: true}});
+  same(resetWord(setSkip(adj, '1.000', false), '1.000'), {});
+  assert.equal(one(0.15, 0.05, adj).skip, true);
+});
+
+test('legacy relative offsets saved before hand-set edges are still read', () => {
+  const sec = one(0.1, 0, {'1.000': {before: 0.2, after: -0.1}});
+  same([sec.start, sec.end], [0.7, 1.4]);
+  near(one(1, 0.05, {}, [{start:0.9,end:3}]).start, 0.9);   // clamped to the segment
+});
+
+test('the reported crossed case is flagged, and widening or reset repairs it', () => {
+  // "fuck" 238.08-238.20, lead 0.5, legacy start 1.0 s later, end 0.85 s earlier.
+  const word = [{w:'shit', s:238.08, e:238.2}];
+  const seg = [{start:157.74, end:239.369}];
+  const broken = {'238.080': {before:-1, after:-0.85}};
+  const sec = one(0.5, 0.05, broken, seg, word);
+  assert.equal(sec.crossed, true);
+  assert.equal(moveEdge(broken, sec, 'start', 0.05), null);       // shrinking further: refused
+  const widened = moveEdge(broken, sec, 'start', -1.3);          // start earlier, by hand
+  same(widened, {'238.080': {after: -0.85, start: 237.28}});
+  assert.equal(one(0.5, 0.05, widened, seg, word).crossed, false);
+  const fixed = one(0.5, 0.05, resetWord(broken, '238.080'), seg, word);
+  same([fixed.crossed, fixed.start, fixed.end], [false, 237.58, 238.25]);
+});
+
+test('sections shrink to 0.01 s; 0.05 s steps stop before reaching zero', () => {
+  let sec = one(0, 0, {});                                        // 0.5 s long
+  let adj = {};
+  for (let i = 0; i < 20; i++) {
+    const next = moveEdge(adj, sec, 'start', 0.05);
+    if (!next) break;
+    adj = next;
+    sec = one(0, 0, adj);
+  }
+  near(sec.end - sec.start, 0.05);
+  sec = one(0, 0, moveEdge(adj, sec, 'end', -0.04));
+  near(sec.end - sec.start, 0.01);
+  assert.equal(sec.crossed, false);
+});
+
+test('a 0.07 s section shrinks to 0.02 s and is still applied', () => {
+  const word = [{w:'shit', s:80.9, e:80.95}];
+  const seg = [{start:0, end:100}];
+  let sec = one(0.01, 0.01, {}, seg, word);
+  same([sec.start, sec.end], [80.89, 80.96]);
+  let adj = {};
+  for (const [edge, d] of [['start', 0.01], ['start', 0.01], ['end', -0.01], ['end', -0.01], ['end', -0.01]]) {
+    adj = moveEdge(adj, sec, edge, d);
+    sec = one(0.01, 0.01, adj, seg, word);
+  }
+  same([sec.start, sec.end, sec.crossed, sec.tooShort], [80.91, 80.93, false, false]);
+  assert.equal(moveEdge(adj, sec, 'end', -0.02), null);           // would leave nothing
+});
+
+test('hand-set edges go well past one second', () => {
+  const sec = one(0, 0, moveEdge({}, one(0, 0, {}), 'end', 1.5));
+  same([sec.rawEnd, sec.end], [3, 3]);                            // clamped by the segment only
 });
 
 test('clip timeline follows segment order', () => {
@@ -40,60 +107,4 @@ test('word normalisation matches word_censor.normalize', () => {
   assert.equal(normalizeWord("'Scheiße!'"), 'scheiße');
   assert.equal(normalizeWord("Don't,"), "don't");
   same(parseWords(' fuck, ,shit '), ['fuck', 'shit']);
-});
-
-test('the reported crossed case is flagged, and reset or widening repairs it', () => {
-  // "fuck" 238.08-238.20, lead 0.5, start 1.0 s later, end 0.85 s earlier.
-  const word = [{w:'fuck', s:238.08, e:238.2}];
-  const seg = [{start:157.74, end:239.369}];
-  const broken = {'238.080': {before:-1, after:-0.85, skip:false}};
-  const [sec] = censorSections(word, ['fuck'], seg, 0.5, 0.05, broken);
-  assert.equal(sec.crossed, true);
-  // Shrinking further is refused; widening is allowed.
-  assert.equal(moveEdge(broken, sec, 'start', 0.05), null);
-  assert.notEqual(moveEdge(broken, sec, 'start', -0.05), null);
-  const [fixed] = censorSections(word, ['fuck'], seg, 0.5, 0.05, resetWord(broken, '238.080'));
-  assert.deepEqual([fixed.crossed, fixed.start, fixed.end], [false, 237.58, 238.25]);
-});
-
-test('edge moves stop at the minimum length; move shifts both edges', () => {
-  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});   // 0.5 s long, 0.05 s steps
-  let adj = {};
-  let current = sec;
-  for (let i = 0; i < 20; i++) {
-    const next = moveEdge(adj, current, 'start', 0.05);
-    if (!next) break;
-    adj = next;
-    [current] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj);
-  }
-  // 0.05 s steps stop at 0.05 s (one more would reach zero); 0.01 s steps go to 0.01 s.
-  assert.ok(Math.abs(current.end - current.start - 0.05) < 1e-9);
-  const fine = moveEdge(adj, current, 'end', -0.01);
-  [current] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, fine);
-  assert.ok(Math.abs(current.end - current.start - 0.04) < 1e-9);
-  const [moved] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, moveEdge({}, sec, 'move', 0.05));
-  assert.deepEqual([moved.start, moved.end], [1.05, 1.55]);
-});
-
-test('per-word moves go past one second', () => {
-  const [sec] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, {});
-  let adj = {};
-  let cur = sec;
-  for (let i = 0; i < 30; i++) { adj = moveEdge(adj, cur, 'end', 0.05); [cur] = censorSections(WORDS, ['shit'], [{start:0,end:3}], 0, 0, adj); }
-  assert.equal(adj['1.000'].after, 1.5);
-  assert.equal(cur.end, 3);   // clamped by the segment, not by a nudge limit
-});
-
-test('a 0.07 s section shrinks to 0.02 s and is still applied', () => {
-  const word = [{w:'shit', s:80.9, e:80.95}];
-  const seg = [{start:0, end:100}];
-  let [sec] = censorSections(word, ['shit'], seg, 0.01, 0.01, {});   // 80.89-80.96
-  assert.deepEqual([sec.start, sec.end], [80.89, 80.96]);
-  let adj = {};
-  for (const [edge, d] of [['start', 0.01], ['start', 0.01], ['end', -0.01], ['end', -0.01], ['end', -0.01]]) {
-    adj = moveEdge(adj, sec, edge, d);
-    [sec] = censorSections(word, ['shit'], seg, 0.01, 0.01, adj);
-  }
-  assert.deepEqual([sec.start, sec.end, sec.crossed, sec.tooShort], [80.91, 80.93, false, false]);
-  assert.equal(moveEdge(adj, sec, 'end', -0.02), null);   // would leave nothing
 });

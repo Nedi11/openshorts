@@ -38,50 +38,63 @@ export function censorSections(words, terms, segments, padBefore, padAfter, adju
         const home = segments[idx];
         const key = occurrenceKey(w);
         const adj = adjustments[key] || {};
-        const rawStart = w.s - clamp(padBefore, 0, 1) - clamp(adj.before, -MAX_NUDGE, MAX_NUDGE);
-        const rawEnd = w.e + clamp(padAfter, 0, 1) + clamp(adj.after, -MAX_NUDGE, MAX_NUDGE);
+        // Presets place an edge until it is set by hand; a hand-set edge is an
+        // absolute source time the presets no longer move (word_censor.sections).
+        const presetStart = w.s - clamp(padBefore, 0, 1) - clamp(adj.before, -MAX_NUDGE, MAX_NUDGE);
+        const presetEnd = w.e + clamp(padAfter, 0, 1) + clamp(adj.after, -MAX_NUDGE, MAX_NUDGE);
+        const manualStart = adj.start !== undefined && adj.start !== null;
+        const manualEnd = adj.end !== undefined && adj.end !== null;
+        const rawStart = manualStart ? Number(adj.start) : presetStart;
+        const rawEnd = manualEnd ? Number(adj.end) : presetEnd;
         const start = Math.max(home.start, rawStart);
         const end = Math.min(home.end, rawEnd);
         out.push({
             key, word: w.w, s: w.s, e: w.e, start: r3(start), end: r3(end),
+            rawStart: r3(rawStart), rawEnd: r3(rawEnd), manualStart, manualEnd,
             clipStart: r3(offsets[idx] + start - home.start),
             clipEnd: r3(offsets[idx] + end - home.start),
-            // crossed: the nudges put the end before the start (the server
-            // refuses it); tooShort: only the segment edge leaves too little.
+            // crossed: the edges are the wrong way round (the server refuses
+            // it); tooShort: only the segment edge leaves too little.
             skip: !!adj.skip, crossed: rawEnd - rawStart < MIN_SECTION,
             tooShort: rawEnd - rawStart >= MIN_SECTION && end - start < MIN_SECTION,
             length: r3(rawEnd - rawStart),
-            before: clamp(adj.before, -MAX_NUDGE, MAX_NUDGE), after: clamp(adj.after, -MAX_NUDGE, MAX_NUDGE),
         });
     }
     return out.sort((a, b) => a.clipStart - b.clipStart);
 }
 
-// Adjustment map with one field changed; entries back at zero are dropped.
-export function adjust(adjustments, key, field, value) {
-    const entry = { before: 0, after: 0, skip: false, ...(adjustments[key] || {}), [field]: value };
-    if (field !== 'skip') entry[field] = r3(clamp(value, -MAX_NUDGE, MAX_NUDGE));
+// Adjustment map with one word's entry replaced; an empty entry is dropped.
+function withEntry(adjustments, key, entry) {
     const next = { ...adjustments };
-    if (!entry.before && !entry.after && !entry.skip) delete next[key];
-    else next[key] = entry;
+    const clean = Object.fromEntries(Object.entries(entry).filter(([k, v]) =>
+        v !== undefined && v !== null && !(k === 'skip' && !v) && !((k === 'before' || k === 'after') && !v)));
+    if (Object.keys(clean).length) next[key] = clean;
+    else delete next[key];
     return next;
 }
 
-// Edge moves for one section. 'start'/'end' move that edge by delta seconds
-// (negative = earlier); 'move' shifts both. Only SHRINKING below
-// MIN_EDIT_LENGTH is refused (null); widening a too-short section is always
-// allowed, so a crossed section can be pulled back open.
-export function moveEdge(adjustments, sec, edge, delta) {
-    const cur = adjustments[sec.key] || {};
-    const before = (cur.before || 0) - (edge === 'end' ? 0 : delta);
-    const after = (cur.after || 0) + (edge === 'start' ? 0 : delta);
-    const length = sec.length + (sec.before - before) * -1 + (after - sec.after);
-    if (edge !== 'move' && length < sec.length && length < MIN_EDIT_LENGTH - 1e-9) return null;
-    if (Math.abs(before) > MAX_NUDGE + 1e-9 || Math.abs(after) > MAX_NUDGE + 1e-9) return null;
-    return adjust(adjust(adjustments, sec.key, 'before', before), sec.key, 'after', after);
+export function setSkip(adjustments, key, skip) {
+    return withEntry(adjustments, key, { ...(adjustments[key] || {}), skip });
 }
 
-// Back to the padded default for this word (keeps a skip).
+// Edge moves for one section. 'start'/'end' move that edge by delta seconds
+// (negative = earlier); 'move' shifts both. The moved edge becomes hand-set:
+// an absolute time the start-earlier / end-later presets no longer change.
+// Only SHRINKING below MIN_EDIT_LENGTH is refused (null); widening a
+// too-short section is always allowed, so a crossed section can be reopened.
+export function moveEdge(adjustments, sec, edge, delta) {
+    const start = edge === 'end' ? sec.rawStart : r3(sec.rawStart + delta);
+    const end = edge === 'start' ? sec.rawEnd : r3(sec.rawEnd + delta);
+    const length = end - start;
+    if (edge !== 'move' && length < sec.length && length < MIN_EDIT_LENGTH - 1e-9) return null;
+    if (start < 0) return null;
+    const entry = { ...(adjustments[sec.key] || {}) };
+    if (edge !== 'end') { entry.start = start; delete entry.before; }
+    if (edge !== 'start') { entry.end = end; delete entry.after; }
+    return withEntry(adjustments, sec.key, entry);
+}
+
+// Back to the presets for this word (keeps a skip).
 export function resetWord(adjustments, key) {
-    return adjust(adjust(adjustments, key, 'before', 0), key, 'after', 0);
+    return withEntry(adjustments, key, { skip: !!(adjustments[key] || {}).skip });
 }
