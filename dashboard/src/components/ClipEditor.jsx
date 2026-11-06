@@ -22,7 +22,8 @@ const HIDE_SOURCE_KEY = 'openshorts_editor_hide_source';
 // Everything about the clip's audio a render bakes in; a change means re-render.
 const audioKey = (mode, words, padBefore, padAfter, adjustments, musicMode, musicDb) =>
     JSON.stringify([mode, words, padBefore, padAfter, adjustments, musicMode, musicDb]);
-const fmtClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+// Millisecond precision: the finest censor step is 0.001 s.
+const fmtClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(3).padStart(6, '0')}`;
 
 // Words per memoised transcript slice. See TranscriptChunk for why this exists.
 const CHUNK_WORDS = 50;

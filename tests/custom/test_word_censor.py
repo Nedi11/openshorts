@@ -179,3 +179,12 @@ def test_presets_only_place_edges_that_were_not_set_by_hand():
     assert (section['start'], section['end']) == (1.1, 1.3)
     with pytest.raises(ValueError):
         _settings(adjustments={'1': {'start': 'soon'}})
+
+
+def test_millisecond_edges_reach_the_render_unrounded():
+    settings = _settings(mode='bleep', adjustments={'1': {'start': 0.853, 'end': 1.545}})
+    [section] = censor.sections(TRANSCRIPT, settings, [{'start': 0.25, 'end': 3}])
+    assert (section['start'], section['end']) == (0.853, 1.545)
+    assert censor.to_clip_time([section], [{'start': 0.25, 'end': 3}]) == [[0.603, 1.295]]
+    assert censor.cut_segments([{'start': 0.25, 'end': 3}], [section]) == [
+        {'start': 0.25, 'end': 0.853}, {'start': 1.545, 'end': 3}]

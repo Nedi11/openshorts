@@ -108,3 +108,12 @@ test('word normalisation matches word_censor.normalize', () => {
   assert.equal(normalizeWord("Don't,"), "don't");
   same(parseWords(' fuck, ,shit '), ['fuck', 'shit']);
 });
+
+test('millisecond steps move an edge by exactly 0.001 s', () => {
+  let sec = one(0.15, 0.05, {});                                  // 0.85-1.55
+  let adj = {};
+  for (let i = 0; i < 3; i++) { adj = moveEdge(adj, sec, 'start', 0.001); sec = one(0.15, 0.05, adj); }
+  same(adj, {'1.000': {start: 0.853}});
+  adj = moveEdge(adj, sec, 'end', -0.005);
+  same([one(0.15, 0.05, adj).start, one(0.15, 0.05, adj).end], [0.853, 1.545]);
+});
