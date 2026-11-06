@@ -1208,7 +1208,8 @@ CAPTION_STYLE_FIELDS = (
     "style", "position", "font_size", "font_name", "font_color",
     "border_color", "border_width", "bg_color", "bg_opacity",
     "highlight_color", "effect", "base_opacity", "uppercase", "reveal",
-    "shadow", "max_chars", "max_duration", "horizontal_padding", "bold", "highlight_enabled")
+    "shadow", "max_chars", "max_duration", "horizontal_padding", "bold", "highlight_enabled",
+    "position_y", "shadow_angle", "shadow_blur", "shadow_color", "shadow_opacity")
 
 
 def _words_transcript(words, language="en"):
@@ -1243,7 +1244,9 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
             highlight_color=s["highlight_color"], bg_color=s["bg_color"],
             bg_opacity=s["bg_opacity"], effect=s["effect"],
             base_opacity=s["base_opacity"], uppercase=s["uppercase"],
-            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"])
+            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"],
+            position_y=s["position_y"], shadow_angle=s["shadow_angle"], shadow_blur=s["shadow_blur"],
+            shadow_color=s["shadow_color"], shadow_opacity=s["shadow_opacity"])
         if max_chars is not None:
             opts["max_chars"] = max_chars
         if max_duration is not None:
@@ -1267,7 +1270,8 @@ def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
                    alignment=s["position"], fontsize=s["font_size"],
                    font_name=s["font_name"], font_color=s["font_color"],
                    border_color=s["border_color"], border_width=s["border_width"],
-                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"])
+                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"],
+                   position_y=s["position_y"])
     return True
 
 
@@ -1309,7 +1313,8 @@ def _recut_hook(clip):
                           duration=hook.get('duration_seconds'),
                           font_scale=hook.get('font_scale', 1.0),
                           layout_ranges=layout_ranges.read(path),
-                          has_captions=bool(clip.get('caption_style')))
+                          has_captions=bool(clip.get('caption_style')),
+                          position_x=hook.get('position_x'), position_y=hook.get('position_y'))
         layout_ranges.write(output, [(r['start'], r['end'], r['layout'], r.get('content'))
                                      for r in layout_ranges.read(path)])
         return output
@@ -4708,7 +4713,9 @@ class CaptionWordIn(BaseModel):
 class SubtitleRequest(BaseModel):
     job_id: str
     clip_index: int
-    position: str = "bottom" # top, middle, bottom
+    position: str = "bottom" # top, middle, bottom, custom
+    # custom: caption bottom edge, % of frame height above the bottom (0-90).
+    position_y: Optional[float] = Field(default=None, ge=0, le=90)
     font_size: int = 16
     font_name: str = "Verdana"
     font_color: str = "#FFFFFF"
@@ -4725,7 +4732,11 @@ class SubtitleRequest(BaseModel):
     bold: bool = True
     highlight_enabled: bool = True
     horizontal_padding: float = Field(default=6.17, ge=0, le=35)
-    shadow: int = 0  # karaoke: drop shadow depth, 0-6
+    shadow: float = Field(default=0, ge=0, le=10)  # karaoke: drop shadow depth
+    shadow_angle: float = Field(default=45, ge=0, le=360)  # 0 right, 90 down
+    shadow_blur: float = Field(default=0, ge=0, le=10)  # libass \blur softness
+    shadow_color: str = "#000000"
+    shadow_opacity: float = Field(default=0.55, ge=0, le=1)
     # Words per line, as a character budget (1 = one word at a time). None
     # keeps the generator's defaults, which is what old clients send.
     max_chars: Optional[int] = None
@@ -5844,6 +5855,8 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
         reveal=req.reveal, shadow=req.shadow, horizontal_padding=req.horizontal_padding, bold=req.bold, highlight_enabled=req.highlight_enabled,
+        position_y=req.position_y, shadow_angle=req.shadow_angle, shadow_blur=req.shadow_blur,
+        shadow_color=req.shadow_color, shadow_opacity=req.shadow_opacity,
     )
     if req.max_chars is not None:
         karaoke_opts["max_chars"] = max(1, min(40, int(req.max_chars)))
@@ -5900,7 +5913,8 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                                alignment=req.position, fontsize=req.font_size,
                                font_name=req.font_name, font_color=req.font_color,
                                border_color=req.border_color, border_width=req.border_width,
-                               bg_color=req.bg_color, bg_opacity=req.bg_opacity, horizontal_padding=req.horizontal_padding, bold=req.bold)
+                               bg_color=req.bg_color, bg_opacity=req.bg_opacity, horizontal_padding=req.horizontal_padding, bold=req.bold,
+                               position_y=req.position_y)
             await render_executor(loop, None, run_burn)
         else:
             # Same code path the hook / edit / recut re-burn uses, so the look
@@ -6033,6 +6047,9 @@ class HookRequest(BaseModel):
     # auto (off the faces and the captions, hooks/hook_placement), or an
     # explicit top / center / bottom, which is drawn exactly there.
     position: Optional[str] = "auto"
+    # custom: 0-100 % of the box's free travel across / down (hooks.custom_overlay_xy).
+    position_x: Optional[float] = Field(default=None, ge=0, le=100)
+    position_y: Optional[float] = Field(default=None, ge=0, le=100)
     size: Optional[str] = "M" # S, M, L
     duration_seconds: Optional[float] = None  # None = hook visible for the whole clip
     style: Optional[str] = "pill"  # pill/classic/dark/yellow/red/outline/outline_yellow
@@ -6136,14 +6153,16 @@ async def add_hook(req: HookRequest, request: Request):
                         sub_path, alignment=style['position'], fontsize=style['font_size'],
                         font_name=style['font_name'], font_color=style['font_color'],
                         border_color=style['border_color'], border_width=style['border_width'],
-                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'], bold=style['bold'])
+                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'], bold=style['bold'],
+                        position_y=style['position_y'])
                     final_name = f'subtitled_{generation_id}_{output_filename}'
                     also = (vf, os.path.join(output_dir, final_name))
                 add_hook_to_video(
                     input_path, req.text, output_path, position=req.position or 'auto',
                     font_scale=font_scale, duration=req.duration_seconds, style=req.style,
                     font=req.font, layout_ranges=clip_data.get('layout_ranges'),
-                    has_captions=had_captions, also=also)
+                    has_captions=had_captions, also=also,
+                    position_x=req.position_x, position_y=req.position_y)
                 if also:
                     sidecar = [(r['start'], r['end'], r['layout'], r.get('content')) for r in ranges]
                     layout_ranges.write(output_path, sidecar)
@@ -6178,6 +6197,7 @@ async def add_hook(req: HookRequest, request: Request):
     else:
         clip_data['auto_hook'] = {
             "text": req.text, "style": req.style, "font": req.font, "position": req.position,
+            "position_x": req.position_x, "position_y": req.position_y,
             "duration_seconds": req.duration_seconds, "font_scale": font_scale,
         }
 

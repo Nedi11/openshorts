@@ -160,7 +160,11 @@ class TestGenerateAss:
     def test_shadow_without_outline_is_the_clean_look(self, tmp_path):
         content = self._render(tmp_path, border_width=0, shadow=2)
         fields = next(l for l in content.splitlines() if l.startswith("Style: Default,")).split(",")
-        assert (fields[16], fields[17]) == ("0", "2")   # Outline, Shadow
+        # The shadow is its own layer under the text (subtitles.shadow_layer_tags),
+        # at the old equal x/y depth; the style itself casts none.
+        assert (fields[16], fields[17]) == ("0", "0")   # Outline, Shadow
+        shadow_events = [l for l in content.splitlines() if l.startswith("Dialogue: 0,")]
+        assert shadow_events and all("\\xshad2\\yshad2" in l for l in shadow_events)
         # Zero remains zero even without a shadow.
         fields = next(l for l in self._render(tmp_path, border_width=0).splitlines()
                       if l.startswith("Style: Default,")).split(",")
