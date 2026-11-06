@@ -202,3 +202,9 @@ editor labels hand-set edges. Relative before/after offsets saved earlier are
 still read. Tests: tests/custom/test_word_censor.py
 (test_presets_only_place_edges_that_were_not_set_by_hand),
 dashboard/tests/censorSections.test.cjs.
+
+AUDIO-001 millisecond steps (implemented): the censor edge buttons also step by
+0.001 s and 0.005 s, and the list shows times to the millisecond, the precision
+word_censor and recut keep throughout. The shortest applied section stays
+0.01 s. Tests: dashboard/tests/censorSections.test.cjs,
+tests/custom/test_word_censor.py (millisecond edges reach the render).
