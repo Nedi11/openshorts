@@ -108,3 +108,18 @@ test('queued aborted exports do not invoke encoding and the next export still ru
   assert.equal(encoded, false);
   assert.equal(await runBrowserRender({ jobId: 'abort', clipIndex: 2 }, async () => 'next'), 'next');
 });
+
+test('cancel button signal stops a running browser export and the next still runs', async () => {
+  const {cancelBrowserRender} = await import('./browserRenderQueue.js');
+  let snapshot=[];
+  const unsubscribe=subscribeBrowserRenders(rows=>{snapshot=rows;});
+  const running=runBrowserRender({jobId:'cancel-job',clipIndex:0},(_progress,signal)=>new Promise((resolve,reject)=>{
+    signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});
+  }));
+  await Promise.resolve();
+  cancelBrowserRender(snapshot.find(r=>r.job_id==='cancel-job').id);
+  await assert.rejects(running,/cancelled/);
+  assert.equal(snapshot.find(r=>r.job_id==='cancel-job').state,'cancelled');
+  assert.equal(await runBrowserRender({jobId:'next-job',clipIndex:0},async()=> 'next'),'next');
+  unsubscribe();
+});

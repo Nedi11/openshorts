@@ -70,5 +70,6 @@ export function getFontStack(fontFamily: string): string {
 
 // Match the server's fontconfig aliases on every browser/OS.
 export const liberationFontFaces = ['Sans', 'Serif', 'Mono'].map(name => `
+@font-face {font-family: 'Subtitle-${name}'; src: url('${staticFile(`fonts/Liberation${name}-Regular.ttf`)}') format('truetype'); font-weight: 400; font-style: normal;}
 @font-face {font-family: 'Subtitle-${name}'; src: url('${staticFile(`fonts/Liberation${name}-Bold.ttf`)}') format('truetype'); font-weight: 700; font-style: normal;}
 `).join('');

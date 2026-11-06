@@ -61,3 +61,37 @@ shadow-only captions retain an adjustable shadow. Implementation: subtitles.py,
 app.py, SubtitleModal.jsx, subtitleGeometry.js, remotion/compositions/Subtitles.tsx.
 Verification: tests/custom/test_editor_additions.py covers small sizing, margins and
 stroke/shadow separation; existing caption persistence and geometry checks retained.
+
+EDIT-003 (implemented): render queue expands only on explicit user click. Queued
+and active server/browser edits have Cancel controls. Server cancellation scopes
+subprocess termination to the selected edit's executor context, waits for the
+worker before releasing the FIFO, and does not commit its resulting URL. Browser
+exports receive an AbortSignal. Cancelled states persist across reloads.
+Implementation: render_cancel.py, render_queue.py, app.py, RenderQueue.jsx,
+browserRenderQueue.js, renderInBrowser.js. Tests: tests/custom/test_word_censor.py,
+dashboard/tests/renderQueue.test.cjs, dashboard/src/lib/browserRenderQueue.test.js.
+
+CAPTION-005 (implemented): No highlight disables active-word color/effects without
+losing the selected color. Bold is saved and applied to ASS, Classic and browser
+captions. Bundled Liberation regular fonts support normal weight; Anton/Impact
+and Montserrat ExtraBold retain their fixed heavy faces. Tests:
+tests/custom/test_editor_additions.py, dashboard/tests/captionPersistence.test.cjs.
+
+RENDER-002 (implemented): editor recuts and manual reframing reapply the saved
+hook before captions, retaining text, style, font, position and duration. Newly
+saved hooks also retain size. Clean derivatives remain available for restyling.
+Implementation: app.py _recut_hook, recut.py perform_recut; regression:
+tests/test_rerender_endpoint.py.
+
+AUDIO-001 (implemented): editor offers Off, Mute + bleep and Cut word modes with
+an editable comma-separated exact-word list. Matching ignores case/punctuation;
+no language guessing or substring matching. Bleep mutes the original samples,
+adds a 1 kHz tone, and replaces caption words with [bleep]. Cut removes matched
+word intervals from video/audio and remaps captions to the shortened timeline.
+The editable original segments are retained so Off can restore the original;
+source transcript and canonical clip are never overwritten. Word-level transcript
+accuracy limits boundaries. Existing captions burned into the uploaded source
+cannot be erased by this feature. Implementation: word_censor.py, app.py,
+recut.py, ClipEditor.jsx; tests/custom/test_word_censor.py verifies actual encoded
+audio frequency suppression, duration, exact matching and caption time remapping;
+tests/test_rerender_endpoint.py covers saved recipe and hook preservation.

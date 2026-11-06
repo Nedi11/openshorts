@@ -120,7 +120,7 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
           direction: block.words.some((w) => RTL_CHARS.test(w.text)) ? "rtl" : "ltr",
           fontFamily: fontStack,
           fontSize: style.fontSize,
-          fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
+          fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : style.bold === false ? 400 : 700,
           maxWidth: `${100 - 2 * (config.horizontalPadding ?? 6.17)}%`,
           ...bgStyle,
         }}
@@ -241,7 +241,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
       style={{
         fontFamily: fontStack,
         fontSize: style.fontSize,
-        fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : 700,
+        fontWeight: style.fontFamily === "Anton" || style.fontFamily === "Impact" ? 400 : style.fontFamily === "Montserrat ExtraBold" ? 800 : style.bold === false ? 400 : 700,
         color: animation === "karaoke" && isActive ? undefined : color,
         ...subtitleOutline(style.borderWidth, style.borderColor),
         textShadow:

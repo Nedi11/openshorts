@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, ChevronDown, Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { subscribeBrowserRenders } from '../lib/browserRenderQueue';
+import { subscribeBrowserRenders, cancelBrowserRender } from '../lib/browserRenderQueue';
 
-const ACTIVE = new Set(['queued', 'running']);
+const ACTIVE = new Set(['queued', 'running', 'cancelling']);
 function elapsed(record, now) {
   const start = record.started_at || record.created_at;
   const seconds = Math.max(0, Math.floor((record.finished_at || now) - start));
@@ -18,6 +18,8 @@ function renderStatus(record, serverUnavailable) {
   if (record.state === 'running') {
     return record.progress == null ? 'Rendering…' : `Rendering… ${record.progress}%`;
   }
+  if (record.state === 'cancelled') return 'Cancelled';
+  if (record.state === 'cancelling') return 'Cancelling…';
   return record.state === 'completed' ? 'Completed' : 'Failed';
 }
 
@@ -30,12 +32,8 @@ export default function RenderQueue({ enabled }) {
   const [warning, setWarning] = useState('');
   const [serverObservedAt, setServerObservedAt] = useState(Date.now() / 1000);
   const [now, setNow] = useState(Date.now() / 1000);
-  const seen = useRef(new Set());
-  const browserSeen = useRef(new Set());
   useEffect(() => subscribeBrowserRenders(records => {
     setBrowserRenders(records);
-    if (records.some(record => ACTIVE.has(record.state) && !browserSeen.current.has(record.id))) setOpen(true);
-    browserSeen.current = new Set(records.map(record => record.id));
   }), []);
   useEffect(() => {
     if (!enabled) return undefined;
@@ -51,8 +49,6 @@ export default function RenderQueue({ enabled }) {
         const data = await response.json();
         if (cancelled) return;
         if (!Array.isArray(data.renders)) throw new Error('Invalid render status response');
-        if (data.renders.some(r => ACTIVE.has(r.state) && !seen.current.has(r.id))) setOpen(true);
-        seen.current = new Set(data.renders.map(r => r.id));
         setRenders(data.renders);
         setWarning(data.warning || '');
         setError('');
@@ -68,6 +64,17 @@ export default function RenderQueue({ enabled }) {
     poll();
     return () => { cancelled = true; clearTimeout(timer); controller?.abort(); };
   }, [enabled]);
+  async function cancelRender(record) {
+    try {
+      if (record.id.startsWith('browser-')) cancelBrowserRender(record.id);
+      else {
+        const response = await apiFetch(`/api/render-queue/${record.id}/cancel`, {method:'POST'});
+        if (!response.ok) throw new Error('Could not cancel render');
+        const data = await response.json();
+        setRenders(records => records.map(r => r.id === record.id ? data.render : r));
+      }
+    } catch (e) { setError(e.message); }
+  }
   const hasActive = renders.some(record => ACTIVE.has(record.state));
   useEffect(() => {
     if (!enabled || !hasActive) return undefined;
@@ -100,6 +107,7 @@ export default function RenderQueue({ enabled }) {
         <p role="status" className={render.state === 'failed' ? 'text-danger' : 'text-ink2'}>
           {renderStatus(render, !!error)}
         </p>
+        {['queued', 'running'].includes(render.state) && <button type="button" className="btn-ghost" onClick={() => cancelRender(render)}>Cancel render</button>}
         {render.error && <p className="text-danger break-words">{render.error}</p>}
       </div>)}
     </div>}

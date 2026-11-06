@@ -111,3 +111,15 @@ test('preview honors saved font geometry, zero outline and Classic static color'
   assert.equal(submitted.fontSize,16);
   assert.equal(submitted.fontName,'Arial');
 });
+
+test('highlight can be turned off and regular weight survives apply',async()=>{
+  global.captionTestFetch=async()=>({ok:true,json:async()=>({captions:[{text:'Test',startMs:0,endMs:900}],durationSec:2,captionStyle:{...saved,bold:false}})});
+  await act(async()=>render());
+  await act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent==='No highlight').click());
+  await act(async()=>applyButton().click());
+  assert.equal(submitted.highlightEnabled,false);
+  assert.equal(submitted.bold,false);
+  assert.equal(submitted.remotion.style.bold,false);
+  assert.equal(submitted.remotion.style.highlightColor,submitted.fontColor);
+  assert.equal(submitted.remotion.style.animation,'none');
+});

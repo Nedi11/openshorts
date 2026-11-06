@@ -30,6 +30,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
 import recut
+import word_censor
 import layout_ranges
 import watermarked
 import media_auth
@@ -1161,6 +1162,7 @@ def _caption_context(data, clip_index):
         transcript = _words_transcript(clip['caption_words'],
                                        transcript.get('language', 'en'))
         start, end = 0.0, transcript['segments'][0]['end']
+    transcript = word_censor.censor_transcript(transcript, clip.get("censorship"))
     return clip, transcript, start, end
 
 
@@ -1206,7 +1208,7 @@ CAPTION_STYLE_FIELDS = (
     "style", "position", "font_size", "font_name", "font_color",
     "border_color", "border_width", "bg_color", "bg_opacity",
     "highlight_color", "effect", "base_opacity", "uppercase", "reveal",
-    "shadow", "max_chars", "max_duration", "horizontal_padding")
+    "shadow", "max_chars", "max_duration", "horizontal_padding", "bold", "highlight_enabled")
 
 
 def _words_transcript(words, language="en"):
@@ -1241,7 +1243,7 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
             highlight_color=s["highlight_color"], bg_color=s["bg_color"],
             bg_opacity=s["bg_opacity"], effect=s["effect"],
             base_opacity=s["base_opacity"], uppercase=s["uppercase"],
-            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"])
+            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"])
         if max_chars is not None:
             opts["max_chars"] = max_chars
         if max_duration is not None:
@@ -1265,7 +1267,7 @@ def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
                    alignment=s["position"], fontsize=s["font_size"],
                    font_name=s["font_name"], font_color=s["font_color"],
                    border_color=s["border_color"], border_width=s["border_width"],
-                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"], horizontal_padding=s["horizontal_padding"])
+                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"], horizontal_padding=s["horizontal_padding"], bold=s["bold"], highlight_enabled=s["highlight_enabled"])
     return True
 
 
@@ -1293,6 +1295,25 @@ def _restyle_captions(video_path, transcript, start, end, style,
     except Exception as e:
         print(f"⚠️  Could not burn the recorded caption style on {video_path}: {e}")
         return None
+
+
+def _recut_hook(clip):
+    hook = clip.get('auto_hook') or {}
+    if not hook.get('text'):
+        return None
+    def overlay(path):
+        output = os.path.join(os.path.dirname(path), f'hooked_{time.time_ns()}_{os.path.basename(path)}')
+        add_hook_to_video(path, hook['text'], output,
+                          style=hook.get('style') or 'classic', font=hook.get('font'),
+                          position=hook.get('position') or 'auto',
+                          duration=hook.get('duration_seconds'),
+                          font_scale=hook.get('font_scale', 1.0),
+                          layout_ranges=layout_ranges.read(path),
+                          has_captions=bool(clip.get('caption_style')))
+        layout_ranges.write(output, [(r['start'], r['end'], r['layout'], r.get('content'))
+                                     for r in layout_ranges.read(path)])
+        return output
+    return overlay
 
 
 def _recut_captioner(clip):
@@ -1982,7 +2003,7 @@ async def cleanup_jobs():
         try:
             await asyncio.sleep(300) # Check every 5 minutes
             now = time.time()
-            
+
             # Simple directory cleanup based on modification time
             # Check OUTPUT_DIR
             _sweep_expired_job_dirs(now)
@@ -2060,7 +2081,7 @@ async def process_queue():
 
             # Process in background task to not block the loop (allowing other slots to fill)
             asyncio.create_task(run_job_wrapper(job_id))
-            
+
         except Exception as e:
             print(f"❌ Queue dispatch error: {e}")
             await asyncio.sleep(1)
@@ -2709,6 +2730,7 @@ app = FastAPI(lifespan=lifespan)
 
 # Personal fork: visible FIFO for edits on the single-worker self-host backend.
 from render_queue import RenderQueue
+from render_cancel import run_in_executor as render_executor
 def _edit_clip_revision(req):
     clips = ((jobs.get(req.job_id) or {}).get('result') or {}).get('clips') or []
     if 0 <= req.clip_index < len(clips):
@@ -2725,6 +2747,13 @@ async def render_queue_status():
     if BILLING_ENABLED:
         raise HTTPException(404, 'Not found')
     return {'renders': _edit_render_queue.snapshot(), 'warning': _edit_render_queue.persistence_error}
+
+
+@app.post('/api/render-queue/{render_id}/cancel')
+async def cancel_edit_render(render_id: str):
+    if BILLING_ENABLED:
+        raise HTTPException(404, 'Not found')
+    return {'render': _edit_render_queue.cancel(render_id)}
 
 
 # Personal fork: isolated self-host scheduling adapter.
@@ -3147,11 +3176,11 @@ async def run_job(job_id, job_data):
         # The daily paid-proxy budget ran out while this job was queued.
         env.pop("PROXY_URL", None)
     output_dir = job_data['output_dir']
-    
+
     jobs[job_id]['status'] = 'processing'
     jobs[job_id]['logs'].append("Job started by worker.")
     print(f"🎬 [run_job] Executing command for {job_id}: {' '.join(cmd)}")
-    
+
     try:
         process = subprocess.Popen(
             cmd,
@@ -3161,12 +3190,12 @@ async def run_job(job_id, job_data):
             cwd=os.getcwd(),
             preexec_fn=_lower_priority,
         )
-        
+
         # We need to capture logs in a thread because Popen isn't async
         t_log = threading.Thread(target=enqueue_output, args=(process.stdout, job_id))
         t_log.daemon = True
         t_log.start()
-        
+
         # Async wait for process with incremental updates
         start_wait = time.time()
         last_heartbeat = time.time()
@@ -3184,7 +3213,7 @@ async def run_job(job_id, job_data):
             if time.time() - last_heartbeat >= HEARTBEAT_EVERY:
                 _touch_manifest(job_id)
                 last_heartbeat = time.time()
-            
+
             # Check for partial results every 2 seconds
             # Look for metadata file
             try:
@@ -3197,11 +3226,11 @@ async def run_job(job_id, job_data):
                     if os.path.getsize(target_json) > 0:
                         with open(target_json, 'r') as f:
                             data = json.load(f)
-                            
+
                         base_name = os.path.basename(target_json).replace('_metadata.json', '')
                         clips = data.get('shorts', [])
                         cost_analysis = data.get('cost_analysis')
-                        
+
                         # Check which clips actually exist on disk
                         # Only clips main.py has announced as finished. It names
                         # the file itself, so a clip shows up WITH its hook and
@@ -3219,7 +3248,7 @@ async def run_job(job_id, job_data):
                              if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
                                  clip['video_url'] = f"/videos/{job_id}/{clip_filename}"
                                  ready_clips.append(clip)
-                        
+
                         if ready_clips:
                              jobs[job_id]['result'] = {'clips': ready_clips, 'cost_analysis': cost_analysis}
             except Exception as e:
@@ -3227,17 +3256,17 @@ async def run_job(job_id, job_data):
                 pass
 
         returncode = process.returncode
-        
+
         if returncode == 0:
             jobs[job_id]['status'] = 'completed'
             jobs[job_id]['logs'].append("Process finished successfully.")
-            
+
             # Self-host: silent AWS S3 backup. Cloud mode stores to R2 instead
             # (see _archive_managed_job), so skip the redundant/paid AWS upload.
             if not BILLING_ENABLED:
                 loop = asyncio.get_event_loop()
                 loop.run_in_executor(None, upload_job_artifacts, output_dir, job_id)
-            
+
             # Find result JSON
             json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
             if not json_files:
@@ -3245,10 +3274,10 @@ async def run_job(job_id, job_data):
                 if _relocate_root_job_artifacts(job_id, output_dir):
                     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
             if json_files:
-                target_json = json_files[0] 
+                target_json = json_files[0]
                 with open(target_json, 'r') as f:
                     data = json.load(f)
-                
+
                 # Enhance result with video URLs
                 base_name = os.path.basename(target_json).replace('_metadata.json', '')
                 clips = data.get('shorts', [])
@@ -3273,7 +3302,7 @@ async def run_job(job_id, job_data):
         else:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['logs'].append(_scrub_secrets(f"Process failed with exit code {returncode}"))
-            
+
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
         # Exception text can embed URLs with credentials (e.g. the proxy URL
@@ -4537,7 +4566,7 @@ async def edit_clip(
             clip = job['result']['clips'][req.clip_index]
             filename = clip['video_url'].split('/')[-1]
             input_path = os.path.join(OUTPUT_DIR, req.job_id, filename)
-        
+
         if not os.path.exists(input_path):
              raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
 
@@ -4554,25 +4583,25 @@ async def edit_clip(
         # Define output path for edited video
         edited_filename = f"edited_{filename}"
         output_path = os.path.join(OUTPUT_DIR, req.job_id, edited_filename)
-        
+
         # Run editing in a thread to avoid blocking main loop
         # Since VideoEditor uses blocking calls (subprocess, API wait)
         def run_edit():
             editor = VideoEditor(api_key=final_api_key)
-            
+
             # SAFE FILE RENAMING STRATEGY (Avoid UnicodeEncodeError in Docker)
             # Create a safe ASCII filename in the same directory
             safe_filename = f"temp_input_{req.job_id}.mp4"
             safe_input_path = os.path.join(OUTPUT_DIR, req.job_id, safe_filename)
-            
+
             # Copy original file to safe path
             # (Copy is safer than rename if something crashes, we keep original)
             shutil.copy(input_path, safe_input_path)
-            
+
             try:
                 # 1. Upload (using safe path)
                 vid_file = editor.upload_video(safe_input_path)
-                
+
                 # 2. Get duration
                 import cv2
                 cap = cv2.VideoCapture(safe_input_path)
@@ -4582,7 +4611,7 @@ async def edit_clip(
                 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 duration = frame_count / fps if fps else 0
                 cap.release()
-                
+
                 # Load transcript from metadata
                 transcript = None
                 try:
@@ -4600,20 +4629,20 @@ async def edit_clip(
                 # the original clip name (safe_input_path is an ASCII temp copy).
                 has_captions = ("subtitled_" in filename) or ("hook_" in filename) or ("hooked_" in filename)
                 filter_data = editor.get_ffmpeg_filter(vid_file, duration, fps=fps, width=width, height=height, transcript=transcript, has_captions=has_captions)
-                
+
                 # 4. Apply
                 # Use safe output name first
                 safe_output_path = os.path.join(OUTPUT_DIR, req.job_id, f"temp_output_{req.job_id}.mp4")
                 editor.apply_edits(safe_input_path, safe_output_path, filter_data)
-                
-                # Move result to final destination (rename works even if dest name has unicode if filesystem supports it, 
+
+                # Move result to final destination (rename works even if dest name has unicode if filesystem supports it,
                 # but python might still struggle if locale is broken? No, os.rename usually handles it better than subprocess args)
                 # Actually, output_path is defined above: f"edited_{filename}"
                 # If filename has unicode, output_path has unicode.
                 # Let's hope shutil.move / os.rename works.
                 if os.path.exists(safe_output_path):
                     shutil.move(safe_output_path, output_path)
-                
+
                 return filter_data
             finally:
                 # Cleanup temp safe input
@@ -4622,12 +4651,12 @@ async def edit_clip(
 
         # Run in thread pool
         loop = asyncio.get_event_loop()
-        plan = await loop.run_in_executor(None, run_edit)
+        plan = await render_executor(loop, None, run_edit)
 
         # Captions back on top, so the clip the user sees keeps them and the
         # clean edited file stays available for a later restyle.
         if had_captions:
-            recap = await loop.run_in_executor(
+            recap = await render_executor(loop,
                 None, _reapply_captions, req.job_id, req.clip_index, output_path)
             if recap:
                 edited_filename = os.path.basename(recap)
@@ -4693,6 +4722,8 @@ class SubtitleRequest(BaseModel):
     base_opacity: float = 1.0  # opacity of non-active words (dimmed modern look)
     uppercase: bool = False
     reveal: bool = False  # karaoke: words appear as they are spoken
+    bold: bool = True
+    highlight_enabled: bool = True
     horizontal_padding: float = Field(default=6.17, ge=0, le=35)
     shadow: int = 0  # karaoke: drop shadow depth, 0-6
     # Words per line, as a character budget (1 = one word at a time). None
@@ -4751,6 +4782,7 @@ async def get_clip_transcript(job_id: str, clip_index: int, request: Request):
         transcript = _words_transcript(clip_data['caption_words'], transcript.get('language', 'en'))
         clip_start, clip_end = 0.0, duration_sec
 
+    transcript = word_censor.censor_transcript(transcript, clip_data.get("censorship"))
     # Extract words within clip range and convert to CaptionWord format
     captions = []
     for segment in transcript.get('segments', []):
@@ -4830,6 +4862,7 @@ async def get_clip_edl(job_id: str, clip_index: int, request: Request):
     clip = clips[clip_index]
 
     segments, canonical_range = _clip_recipe_parts(clip)
+    segments = (clip.get('censorship') or {}).get('original_segments') or segments
     transcript = data.get('transcript') or {}
     words = recut.transcript_words(transcript)
 
@@ -4860,6 +4893,8 @@ async def get_clip_edl(job_id: str, clip_index: int, request: Request):
         "clip_index": clip_index,
         "title": clip.get('video_title_for_youtube_short') or '',
         "segments": segments,
+        "rendered_segments": (clip.get("recipe") or {}).get("segments") or segments,
+        "censorship": clip.get("censorship") or {"mode": "off", "words": word_censor.DEFAULT_WORDS},
         "framing": (clip.get('recipe') or {}).get('framing') or 'auto',
         "canonical_range": canonical_range,
         "duration": total,
@@ -4896,6 +4931,8 @@ class RerenderRequest(BaseModel):
     # None = inherit the recipe's framing (so plain trims keep the look);
     # 'auto' resets to the classifier; 'full'/'track' force a layout.
     framing: Optional[str] = None
+    censor_mode: str = "off"
+    censor_words: List[str] = Field(default_factory=lambda: list(word_censor.DEFAULT_WORDS), max_length=200)
 
 
 # Manual framing -> reframe-engine strategy. 'full' shows the whole source
@@ -4993,6 +5030,21 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
     except recut.RecutError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    if req.censor_mode not in ('off', 'bleep', 'cut'):
+        raise HTTPException(400, 'Choose off, bleep, or cut for word censorship')
+    if any(len(w) > 80 or len(w.split()) != 1 for w in req.censor_words):
+        raise HTTPException(400, 'Enter individual words, separated by commas')
+    original_segments = [dict(s) for s in segments]
+    censorship = {'mode': req.censor_mode, 'words': req.censor_words,
+                  'original_segments': original_segments}
+    if req.censor_mode == 'cut':
+        try:
+            segments = word_censor.cut_segments(segments, word_censor.matches(transcript, req.censor_words))
+        except ValueError as error:
+            raise HTTPException(400, str(error))
+    uncensored_virtual = recut.virtual_transcript(transcript, segments)
+    audio_processor = (lambda path: word_censor.bleep(path, uncensored_virtual, req.censor_words)) if req.censor_mode == 'bleep' else None
+
     # A framing override always re-reframes from the source: the canonical file
     # has the old layout baked into its pixels.
     fast = (force_strategy is None
@@ -5012,7 +5064,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
     reservation_id = await reserve_managed_action(
         request, rerender_minutes, req.job_id, "rerender")
 
-    v_transcript = (recut.virtual_transcript(transcript, segments)
+    v_transcript = (word_censor.censor_transcript(uncensored_virtual, censorship)
                     if req.reapply_captions else None)
 
     def run_recut():
@@ -5023,21 +5075,22 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
                     segments, canonical_range['start'], canonical_range['end']),
                 output_dir=output_dir, clean_name=clean_name,
                 reframe=False, captions_transcript=v_transcript,
-                captioner=_recut_captioner(clip))
+                captioner=_recut_captioner(clip), overlay=_recut_hook(clip), audio_processor=audio_processor)
         return recut.perform_recut(
             input_path=source_path, segments=segments,
             output_dir=output_dir, clean_name=clean_name,
             reframe=True, output_format=data.get('output_format', 'auto'),
             force_strategy=force_strategy,
             captions_transcript=v_transcript,
-            captioner=_recut_captioner(clip),
+            captioner=_recut_captioner(clip), overlay=_recut_hook(clip),
+            audio_processor=audio_processor,
             # Trim the source's own subtitles only when ours go back on.
             subtitle_band=(data.get('source_subtitle_band')
                            if v_transcript else None))
 
     try:
         loop = asyncio.get_event_loop()
-        served_name, _clean_recut_name = await loop.run_in_executor(None, run_recut)
+        served_name, _clean_recut_name = await render_executor(loop, None, run_recut)
         served_name = await _deliver(request, req.job_id, served_name)
 
         new_video_url = f"/videos/{req.job_id}/{served_name}"
@@ -5052,7 +5105,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
         new_end = max(s['end'] for s in segments)
 
         updates = {'video_url': new_video_url, 'start': new_start,
-                   'end': new_end, 'recipe': new_recipe,
+                   'end': new_end, 'recipe': new_recipe, 'censorship': censorship,
                    # The stacked stretches of THIS render (empty on the fast
                    # path, which never reframes): captions follow them.
                    'layout_ranges': layout_ranges.read(
@@ -5085,6 +5138,8 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
             "start": new_start,
             "end": new_end,
             "duration": total,
+            "editor_segments": original_segments,
+            "censorship": censorship,
             "render_path": "fast" if fast else "source",
         }
     except Exception as e:
@@ -5271,7 +5326,7 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
     async with lock:
         try:
             loop = asyncio.get_event_loop()
-            orig_w, orig_h, scenes_out, preview_name = await loop.run_in_executor(None, build)
+            orig_w, orig_h, scenes_out, preview_name = await render_executor(loop, None, build)
         except Exception as e:
             print(f"Scene listing error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -5395,6 +5450,11 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
     # "Error opening output ...: File name too long".
     clean_name = f"{base_name}_clip_{req.clip_index + 1}.mp4"
 
+    censorship = clip.get('censorship') or {}
+    uncensored_virtual = recut.virtual_transcript(data.get('transcript') or {}, segments)
+    audio_processor = (lambda path: word_censor.bleep(path, uncensored_virtual, censorship.get('words', []))) if censorship.get('mode') == 'bleep' else None
+    v_transcript = word_censor.censor_transcript(v_transcript, censorship) if v_transcript else None
+
     def run():
         return recut.perform_recut(
             input_path=source_path, segments=segments,
@@ -5403,14 +5463,15 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
             force_strategy=force_strategy,
             crop_overrides=overrides,
             captions_transcript=v_transcript,
-            captioner=_recut_captioner(clip),
+            captioner=_recut_captioner(clip), overlay=_recut_hook(clip),
+            audio_processor=audio_processor,
             # Trim the source's own subtitles only when ours go back on.
             subtitle_band=(data.get('source_subtitle_band')
                            if v_transcript else None))
 
     try:
         loop = asyncio.get_event_loop()
-        served_name, _clean = await loop.run_in_executor(None, run)
+        served_name, _clean = await render_executor(loop, None, run)
         served_name = await _deliver(request, req.job_id, served_name)
 
         new_video_url = f"/videos/{req.job_id}/{served_name}"
@@ -5643,7 +5704,7 @@ async def generate_effects_config(
                     os.remove(safe_input_path)
 
         loop = asyncio.get_event_loop()
-        effects_config = await loop.run_in_executor(None, run_effects_generation)
+        effects_config = await render_executor(loop, None, run_effects_generation)
 
         if effects_config is None:
             raise HTTPException(status_code=500, detail="Failed to generate effects config from Gemini")
@@ -5678,7 +5739,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     await _ensure_job_files(req.job_id, request)
     if req.job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     # Reload job data from disk just in case metadata was updated
     job = jobs[req.job_id]
     await _assert_job_owner(request, job)
@@ -5686,21 +5747,21 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     # We need to access metadata.json to get the transcript
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-    
+
     if not json_files:
         raise HTTPException(status_code=404, detail="Metadata not found")
-        
+
     with open(json_files[0], 'r') as f:
         data = json.load(f)
-        
+
     transcript = data.get('transcript')
     if not transcript:
         raise HTTPException(status_code=400, detail="Transcript not found in metadata. Please process a new video.")
-        
+
     clips = data.get('shorts', [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
-        
+
     clip_data = clips[req.clip_index]
 
     # Recut clips concatenate several source segments, so their caption window
@@ -5774,6 +5835,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
     seam_ranges = layout_ranges.split_ranges(
         clip_data.get('layout_ranges') or layout_ranges.read(input_path))
     caption_style = {k: getattr(req, k) for k in CAPTION_STYLE_FIELDS}
+    sub_transcript = word_censor.censor_transcript(sub_transcript, clip_data.get("censorship"))
     karaoke_opts = dict(
         split_ranges=seam_ranges,
         alignment=req.position, fontsize=req.font_size, font_name=req.font_name,
@@ -5781,7 +5843,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         border_width=req.border_width, highlight_color=req.highlight_color,
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
-        reveal=req.reveal, shadow=req.shadow, horizontal_padding=req.horizontal_padding,
+        reveal=req.reveal, shadow=req.shadow, horizontal_padding=req.horizontal_padding, bold=req.bold, highlight_enabled=req.highlight_enabled,
     )
     if req.max_chars is not None:
         karaoke_opts["max_chars"] = max(1, min(40, int(req.max_chars)))
@@ -5823,12 +5885,12 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
 
             loop = asyncio.get_event_loop()
             try:
-                success = await loop.run_in_executor(None, run_transcribe_srt)
+                success = await render_executor(loop, None, run_transcribe_srt)
             finally:
                 # The ASR models must not stay resident in the API process:
                 # they held 7.7 GB of VRAM idle (transcribe_backends.release_models).
                 import transcribe_backends
-                await loop.run_in_executor(None, transcribe_backends.release_models)
+                await render_executor(loop, None, transcribe_backends.release_models)
             if not success:
                 raise HTTPException(status_code=400, detail="No words found for this clip range.")
 
@@ -5838,17 +5900,17 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                                alignment=req.position, fontsize=req.font_size,
                                font_name=req.font_name, font_color=req.font_color,
                                border_color=req.border_color, border_width=req.border_width,
-                               bg_color=req.bg_color, bg_opacity=req.bg_opacity, horizontal_padding=req.horizontal_padding)
-            await loop.run_in_executor(None, run_burn)
+                               bg_color=req.bg_color, bg_opacity=req.bg_opacity, horizontal_padding=req.horizontal_padding, bold=req.bold)
+            await render_executor(loop, None, run_burn)
         else:
             # Same code path the hook / edit / recut re-burn uses, so the look
             # recorded below is the look that was burned here.
-            success = await asyncio.get_event_loop().run_in_executor(
+            success = await render_executor(asyncio.get_event_loop(),
                 None, _burn_caption_style, input_path, output_path, srt_path,
                 sub_transcript, sub_start, sub_end, caption_style, seam_ranges)
             if not success:
                 raise HTTPException(status_code=400, detail="No words found for this clip range.")
-        
+
     except Exception as e:
         print(f"❌ Subtitle Error: {e}")
         if reservation_id:
@@ -5870,7 +5932,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
          else:
              job['result']['clips'][req.clip_index].pop('caption_words', None)
 
-    
+
     # Update Metadata on Disk (Persistence)
     try:
         if req.clip_index < len(clips):
@@ -5884,7 +5946,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                 clips[req.clip_index].pop('caption_words', None)
             # Update the main data structure
             data['shorts'] = clips
-            
+
             # Write back
             write_json_atomic(json_files[0], data, indent=4)
             print(f"✅ Metadata updated with subtitled video for clip {req.clip_index}")
@@ -5989,19 +6051,19 @@ async def add_hook(req: HookRequest, request: Request):
     await _assert_job_owner(request, job)
     output_dir = os.path.join(OUTPUT_DIR, req.job_id)
     json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
-    
+
     if not json_files:
         raise HTTPException(status_code=404, detail="Metadata not found")
-        
+
     with open(json_files[0], 'r') as f:
         data = json.load(f)
-        
+
     clips = data.get('shorts', [])
     if req.clip_index >= len(clips):
         raise HTTPException(status_code=404, detail="Clip not found")
-        
+
     clip_data = clips[req.clip_index]
-    
+
     # Video Path
     if req.input_filename:
         filename = os.path.basename(req.input_filename)
@@ -6010,7 +6072,7 @@ async def add_hook(req: HookRequest, request: Request):
         if not filename:
              base_name = os.path.basename(json_files[0]).replace('_metadata.json', '')
              filename = f"{base_name}_clip_{req.clip_index+1}.mp4"
-         
+
     input_path = os.path.join(output_dir, filename)
     if not os.path.exists(input_path):
         raise HTTPException(status_code=404, detail=f"Video file not found: {input_path}")
@@ -6074,7 +6136,7 @@ async def add_hook(req: HookRequest, request: Request):
                         sub_path, alignment=style['position'], fontsize=style['font_size'],
                         font_name=style['font_name'], font_color=style['font_color'],
                         border_color=style['border_color'], border_width=style['border_width'],
-                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'])
+                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'], bold=style['bold'])
                     final_name = f'subtitled_{generation_id}_{output_filename}'
                     also = (vf, os.path.join(output_dir, final_name))
                 add_hook_to_video(
@@ -6089,7 +6151,7 @@ async def add_hook(req: HookRequest, request: Request):
                 return final_name
 
             loop = asyncio.get_event_loop()
-            output_filename = await loop.run_in_executor(None, run_hook)
+            output_filename = await render_executor(loop, None, run_hook)
 
         except Exception as e:
             print(f"❌ Hook Error: {e}")
@@ -6102,7 +6164,7 @@ async def add_hook(req: HookRequest, request: Request):
 
     # Adding/updating hooks already included captions in the same filter graph.
     if had_captions and req.remove:
-        recap = await asyncio.get_event_loop().run_in_executor(
+        recap = await render_executor(asyncio.get_event_loop(),
             None, _reapply_captions, req.job_id, req.clip_index, output_path)
         if recap:
             output_filename = os.path.basename(recap)
@@ -6116,7 +6178,7 @@ async def add_hook(req: HookRequest, request: Request):
     else:
         clip_data['auto_hook'] = {
             "text": req.text, "style": req.style, "font": req.font, "position": req.position,
-            "duration_seconds": req.duration_seconds,
+            "duration_seconds": req.duration_seconds, "font_scale": font_scale,
         }
 
     # Update Persistence (Same logic as subtitles)
@@ -6387,10 +6449,10 @@ async def post_to_socials(req: SocialPostRequest, request: Request):
         # clip['video_url'] is like "/videos/{job_id}/{filename}"
         # We constructed it as: f"/videos/{job_id}/{clip_filename}"
         # And file is at f"{OUTPUT_DIR}/{job_id}/{clip_filename}"
-        
+
         filename = clip['video_url'].split('/')[-1]
         file_path = os.path.join(OUTPUT_DIR, req.job_id, filename)
-        
+
         if not os.path.exists(file_path):
              raise HTTPException(status_code=404, detail=f"Video file not found: {file_path}")
 
@@ -6398,7 +6460,7 @@ async def post_to_socials(req: SocialPostRequest, request: Request):
         # Fallbacks
         final_title = req.title or clip.get('title', 'Viral Short')
         final_description = req.description or clip.get('video_description_for_instagram') or clip.get('video_description_for_tiktok') or "Check this out!"
-        
+
         # Prepare form data
         url = "https://api.upload-post.com/api/upload"
         headers = {
@@ -6418,12 +6480,12 @@ async def post_to_socials(req: SocialPostRequest, request: Request):
             data_payload["scheduled_date"] = req.scheduled_date
             if req.timezone:
                 data_payload["timezone"] = req.timezone
-        
+
         # Add Platform specifics
         if "tiktok" in req.platforms:
              data_payload["tiktok_title"] = final_description
              data_payload["post_mode"] = TIKTOK_POST_MODE
-             
+
         if "instagram" in req.platforms:
              data_payload["instagram_title"] = final_description
              data_payload["media_type"] = "REELS"
@@ -6559,20 +6621,20 @@ async def get_social_user(request: Request):
     url = "https://api.upload-post.com/api/uploadposts/users"
     print(f"🔍 Fetching User ID from: {url}")
     headers = {"Authorization": f"Apikey {api_key}"}
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
                 print(f"❌ Upload-Post User Fetch Error: {resp.text}")
                 raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch user: {resp.text}")
-            
+
             data = resp.json()
             # Never log the body: on the managed key it lists every profile
             # on the account (usernames, redirect URLs), ~2 MB per call.
             _n = len(data.get('profiles') or []) if isinstance(data, dict) else 0
             print(f"🔍 Upload-Post users: {_n} profiles")
-            
+
             user_id = None
             # The structure is {'success': True, 'profiles': [{'username': '...'}, ...]}
             profiles_list = []
@@ -6591,12 +6653,12 @@ async def get_social_user(request: Request):
                                  # If it's a dict and typically has data, or just not empty string
                                  if isinstance(account_info, dict):
                                      connected.append(platform)
-                             
+
                              profiles_list.append({
                                  "username": username,
                                  "connected": connected
                              })
-            
+
             # Managed users must only ever see their own profile.
             if forced_profile is not None:
                 profiles_list = [p for p in profiles_list if p.get("username") == forced_profile]
@@ -6606,8 +6668,8 @@ async def get_social_user(request: Request):
                 return {"profiles": [], "error": "No profiles found"}
 
             return {"profiles": profiles_list}
-            
-            
+
+
         except Exception as e:
              raise HTTPException(status_code=500, detail=str(e))
 

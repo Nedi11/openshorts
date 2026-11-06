@@ -3,7 +3,9 @@ let tail = Promise.resolve();
 let sequence = 0;
 let records = [];
 const listeners = new Set();
-const ACTIVE = new Set(['queued', 'running']);
+const controllers = new Map();
+export function cancelBrowserRender(id) { controllers.get(id)?.abort(); }
+const ACTIVE = new Set(['queued', 'running', 'cancelling']);
 
 function notifyListener(listener) {
   try {
@@ -45,12 +47,25 @@ export function runBrowserRender(params, render) {
     job_id: params.jobId || '', clip_index: params.clipIndex ?? null,
     state: 'queued', created_at: Date.now() / 1000, progress: 0,
   };
+  const controller = new AbortController();
+  controllers.set(record.id, controller);
+  let rejectAbort;
+  const aborted = new Promise((_resolve, reject) => { rejectAbort = reject; });
+  controller.signal.addEventListener('abort', () => {
+    record.state = record.state === 'queued' ? 'cancelled' : 'cancelling';
+    if (record.state === 'cancelled') record.finished_at = Date.now()/1000;
+    notify();
+    rejectAbort(new DOMException('Render cancelled', 'AbortError'));
+  }, {once:true});
+  const abort = () => controller.abort();
+  params.signal?.addEventListener("abort", abort, {once:true});
+  if (params.signal?.aborted) controller.abort();
   records.push(record);
   pruneHistory();
   notify();
   const task = tail.then(async () => {
     try {
-      params.signal?.throwIfAborted();
+      controller.signal.throwIfAborted();
       record.state = 'running';
       record.started_at = Date.now() / 1000;
       notify();
@@ -61,20 +76,23 @@ export function runBrowserRender(params, render) {
           record.progress = percent;
           notify();
         }
-      });
+      }, controller.signal);
+      controller.signal.throwIfAborted();
       record.state = 'completed';
       record.progress = 100;
       return result;
     } catch (error) {
-      record.state = 'failed';
+      record.state = controller.signal.aborted ? 'cancelled' : 'failed';
       record.error = error?.message || String(error ?? 'Browser render failed');
       throw error;
     } finally {
+      controllers.delete(record.id);
+      params.signal?.removeEventListener("abort", abort);
       record.finished_at = Date.now() / 1000;
       pruneHistory();
       notify();
     }
   });
   tail = task.catch(() => {});
-  return task;
+  return Promise.race([task, aborted]);
 }

@@ -133,6 +133,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [baseOpacity, setBaseOpacity] = useState(1.0);
     const [uppercase, setUppercase] = useState(true);
     const [reveal, setReveal] = useState(false);
+    const [bold, setBold] = useState(true);
+    const [highlightEnabled, setHighlightEnabled] = useState(true);
     const [shadow, setShadow] = useState(0);
     const [horizontalPadding, setHorizontalPadding] = useState(6.17);
     const [oneWord, setOneWord] = useState(false);
@@ -158,6 +160,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setBgOpacity(0);
         setReveal(!!p.reveal);
         setShadow(p.shadow || 0);
+        setHighlightEnabled(true);
+        setBold(true);
         setOneWord(!!p.oneWord);
         if (p.fontSize) setFontSize(p.fontSize);
         setAnimationState(p.style === 'karaoke' ? (EFFECT_TO_ANIMATION[p.effect] || 'none') : 'none');
@@ -209,6 +213,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                     setUppercase(saved.uppercase ?? true);
                     setReveal(!!saved.reveal);
                     setShadow(saved.shadow ?? 0);
+                    setBold(saved.bold ?? true);
+                    setHighlightEnabled(saved.highlight_enabled ?? true);
                     setHorizontalPadding(saved.horizontal_padding ?? 6.17);
                     setOneWord(saved.max_chars === 1);
                     setSavedLineBudget(saved.max_chars ?? 20);
@@ -263,17 +269,18 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         horizontalPadding,
         maxDurationMs: maxDuration * 1000,
         style: {
+            bold,
             fontFamily: fontName,
             fontSize: subtitleFontPixels(fontSize, fontName),
             fontColor,
-            highlightColor: style === 'karaoke' ? highlightColor : fontColor,
+            highlightColor: style === 'karaoke' && highlightEnabled ? highlightColor : fontColor,
             borderColor,
             borderWidth: Math.trunc(borderWidth) * ASS_SCALE,
             bgColor,
             bgOpacity,
-            animation: style === 'karaoke' ? animation : 'none',
+            animation: style === 'karaoke' && highlightEnabled ? animation : 'none',
             // Karaoke look reflected live in the playable preview.
-            baseOpacity: style === 'karaoke' ? baseOpacity : 1,
+            baseOpacity: style === 'karaoke' && highlightEnabled ? baseOpacity : 1,
             uppercase: style === 'karaoke' ? uppercase : false,
             reveal: style === 'karaoke' && reveal,
             shadow: style === 'karaoke' ? shadow : 0,
@@ -290,7 +297,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         fontFamily: fontName,
         color: fontColor,
         fontSize: '20px',
-        fontWeight: 'bold',
+        fontWeight: bold ? 'bold' : 'normal',
         maxWidth: `${100 - horizontalPadding * 2}%`,
         padding: '6px 12px',
         borderRadius: '4px',
@@ -487,6 +494,8 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             </select>
                         </div>
 
+                        <label className="readout flex gap-2"><input type="checkbox" checked={bold} onChange={e => setBold(e.target.checked)} />Bold text</label>
+                        <p className="text-xs text-muted">Anton and Montserrat ExtraBold have a fixed heavy weight.</p>
                         {/* Text Color */}
                         <div>
                             <p className="eyebrow mb-2">Text color</p>
@@ -510,12 +519,13 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                         {/* Highlight Color (new) */}
                         <div>
                             <p className="eyebrow mb-2">Highlight</p>
+                            <button type="button" className="btn-ghost" aria-pressed={!highlightEnabled} onClick={() => setHighlightEnabled(false)}>No highlight</button>
                             <div className="flex flex-wrap items-center gap-2.5">
                                 {HIGHLIGHT_PRESETS.map((c) => (
                                     <button
                                         key={c.color}
-                                        onClick={() => setHighlightColor(c.color)}
-                                        className={swatchClass(highlightColor === c.color)}
+                                        onClick={() => { setHighlightColor(c.color); setHighlightEnabled(true); }}
+                                        className={swatchClass(highlightEnabled && highlightColor === c.color)}
                                         style={{ backgroundColor: c.color }}
                                         title={c.label}
                                     />
@@ -595,7 +605,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             const styleOptions = {
                                 position, fontSize, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
                                 // Karaoke burn (server-side ASS render)
-                                style, effect, baseOpacity, uppercase, highlightColor,
+                                style, effect, baseOpacity, uppercase, highlightColor, bold, highlightEnabled,
                                 reveal: !oneWord && reveal, shadow, horizontalPadding, maxChars, maxDuration,
                                 // Remotion data
                                 remotion: useRemotionPreview ? subtitleConfig : null,

@@ -17,8 +17,9 @@ import { ShortVideo } from '../remotion/compositions/ShortVideo';
  * @returns {Promise<string>} Blob URL of the rendered MP4
  */
 export function renderInBrowser(params) {
-    return runBrowserRender(params, reportProgress => renderComposition({
+    return runBrowserRender(params, (reportProgress, signal) => renderComposition({
         ...params,
+        signal,
         onProgress: progress => {
             reportProgress(progress);
             params.onProgress?.(progress);
