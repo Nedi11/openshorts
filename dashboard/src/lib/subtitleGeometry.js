@@ -5,7 +5,7 @@ const RATIOS = {Anton: 2048/3550, Impact: 2048/3550,
   'Montserrat ExtraBold': 1000/1562, Georgia: 2048/2268,
   'Courier New': 2048/2320};
 export function subtitleFontPixels(size, font) {
-  const assSize = Math.max(10, Math.trunc(Math.min(200, Math.max(10, size)) * .85));
+  const assSize = Math.trunc(Math.min(200, Math.max(6, size)) * .85);
   return assSize * ASS_SCALE * (RATIOS[font] ?? 2048/2288);
 }
 

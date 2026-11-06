@@ -37,6 +37,7 @@ export interface SubtitleConfig {
   position: SubtitlePosition;
   style: SubtitleStyle;
   // Line budget, mirrors the burn's max_chars / max_duration.
+  horizontalPadding?: number;
   maxChars?: number;
   maxDurationMs?: number;
 }

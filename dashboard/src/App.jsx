@@ -621,6 +621,7 @@ function App() {
             clip_index: i,
             position: options.position,
             font_size: options.fontSize,
+                    horizontal_padding: options.horizontalPadding ?? 6.17,
             font_name: options.fontName,
             font_color: options.fontColor,
             border_color: options.borderColor,

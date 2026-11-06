@@ -52,3 +52,12 @@ Manual acceptance: an isolated container on the desktop AMD VAAPI device produce
 CAPTION-003: bundled Liberation bold fonts make Arial/Verdana/Helvetica, Georgia and Courier previews independent of browser OS. Preview sizing follows the integer ASS size and Windows ascent/descent of each bundled font. Classic top/middle use ASS alignments 8/5. Explicit zero outlines stay zero. Subtitle/restyle output IDs use nanoseconds to avoid same-second URL reuse. CSS active-word animations remain an approximation of libass effects; face-aware hook avoidance can also shift server captions.
 
 Caption outline regression: preview/browser exports use a continuous CSS stroke painted before the fill, rather than four offset copies of each glyph. This preserves thick outlines without the duplicated-word artifact. Covered by dashboard/tests/subtitleGeometry.test.cjs.
+
+CAPTION-004 (implemented): caption editor offers 0–35% horizontal padding per side,
+saved across caption and hook edits, and a continuous 6–70 size slider below Native.
+ASS and Classic burns apply horizontal margins; preview/export width and grouping
+follow the selected padding. A stroke suppresses the separate preset drop shadow;
+shadow-only captions retain an adjustable shadow. Implementation: subtitles.py,
+app.py, SubtitleModal.jsx, subtitleGeometry.js, remotion/compositions/Subtitles.tsx.
+Verification: tests/custom/test_editor_additions.py covers small sizing, margins and
+stroke/shadow separation; existing caption persistence and geometry checks retained.

@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from starlette.background import BackgroundTask
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from s3_uploader import upload_job_artifacts, list_all_clips, upload_actor_to_s3, list_actor_gallery, upload_video_to_gallery, list_video_gallery
 import recut
 import layout_ranges
@@ -1206,7 +1206,7 @@ CAPTION_STYLE_FIELDS = (
     "style", "position", "font_size", "font_name", "font_color",
     "border_color", "border_width", "bg_color", "bg_opacity",
     "highlight_color", "effect", "base_opacity", "uppercase", "reveal",
-    "shadow", "max_chars", "max_duration")
+    "shadow", "max_chars", "max_duration", "horizontal_padding")
 
 
 def _words_transcript(words, language="en"):
@@ -1241,7 +1241,7 @@ def _prepare_caption_style(sub_path, transcript, start, end, style, split_ranges
             highlight_color=s["highlight_color"], bg_color=s["bg_color"],
             bg_opacity=s["bg_opacity"], effect=s["effect"],
             base_opacity=s["base_opacity"], uppercase=s["uppercase"],
-            reveal=s["reveal"], shadow=s["shadow"])
+            reveal=s["reveal"], shadow=s["shadow"], horizontal_padding=s["horizontal_padding"])
         if max_chars is not None:
             opts["max_chars"] = max_chars
         if max_duration is not None:
@@ -1265,7 +1265,7 @@ def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
                    alignment=s["position"], fontsize=s["font_size"],
                    font_name=s["font_name"], font_color=s["font_color"],
                    border_color=s["border_color"], border_width=s["border_width"],
-                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"])
+                   bg_color=s["bg_color"], bg_opacity=s["bg_opacity"], horizontal_padding=s["horizontal_padding"])
     return True
 
 
@@ -4693,6 +4693,7 @@ class SubtitleRequest(BaseModel):
     base_opacity: float = 1.0  # opacity of non-active words (dimmed modern look)
     uppercase: bool = False
     reveal: bool = False  # karaoke: words appear as they are spoken
+    horizontal_padding: float = Field(default=6.17, ge=0, le=35)
     shadow: int = 0  # karaoke: drop shadow depth, 0-6
     # Words per line, as a character budget (1 = one word at a time). None
     # keeps the generator's defaults, which is what old clients send.
@@ -5780,7 +5781,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         border_width=req.border_width, highlight_color=req.highlight_color,
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
-        reveal=req.reveal, shadow=req.shadow,
+        reveal=req.reveal, shadow=req.shadow, horizontal_padding=req.horizontal_padding,
     )
     if req.max_chars is not None:
         karaoke_opts["max_chars"] = max(1, min(40, int(req.max_chars)))
@@ -5837,7 +5838,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                                alignment=req.position, fontsize=req.font_size,
                                font_name=req.font_name, font_color=req.font_color,
                                border_color=req.border_color, border_width=req.border_width,
-                               bg_color=req.bg_color, bg_opacity=req.bg_opacity)
+                               bg_color=req.bg_color, bg_opacity=req.bg_opacity, horizontal_padding=req.horizontal_padding)
             await loop.run_in_executor(None, run_burn)
         else:
             # Same code path the hook / edit / recut re-burn uses, so the look
@@ -6073,7 +6074,7 @@ async def add_hook(req: HookRequest, request: Request):
                         sub_path, alignment=style['position'], fontsize=style['font_size'],
                         font_name=style['font_name'], font_color=style['font_color'],
                         border_color=style['border_color'], border_width=style['border_width'],
-                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'])
+                        bg_color=style['bg_color'], bg_opacity=style['bg_opacity'], horizontal_padding=style['horizontal_padding'])
                     final_name = f'subtitled_{generation_id}_{output_filename}'
                     also = (vf, os.path.join(output_dir, final_name))
                 add_hook_to_video(

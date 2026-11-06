@@ -15,7 +15,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 let SubtitleModal, directory, container, root, submitted;
 const saved = {style:'karaoke',position:'top',font_size:16,font_name:'Arial',font_color:'#ABCDEF',
   border_color:'#123456',border_width:0,bg_color:'#000000',bg_opacity:0,highlight_color:'#FFFFFF',
-  effect:'none',base_opacity:1,uppercase:false,reveal:false,shadow:1,max_chars:23,max_duration:1.8};
+  effect:'none',base_opacity:1,uppercase:false,reveal:false,shadow:1,horizontal_padding:20,max_chars:23,max_duration:1.8};
 
 before(async () => {
   const cache = path.join(__dirname, '../node_modules/.cache');
@@ -60,6 +60,8 @@ test('saved caption settings survive closing and a hook-triggered remount',async
   assert.equal(first.fontName,'Arial');
   assert.equal(first.borderWidth,0);
   assert.equal(first.shadow,1);
+  assert.equal(first.horizontalPadding,20);
+  assert.equal(first.remotion.horizontalPadding,20);
   assert.equal(first.uppercase,false);
   assert.equal(first.position,'top');
   assert.equal(first.fontColor,'#ABCDEF');
