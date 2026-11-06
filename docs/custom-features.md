@@ -202,3 +202,15 @@ editor labels hand-set edges. Relative before/after offsets saved earlier are
 still read. Tests: tests/custom/test_word_censor.py
 (test_presets_only_place_edges_that_were_not_set_by_hand),
 dashboard/tests/censorSections.test.cjs.
+
+CAPTION-008 (implemented): caption outlines and shadows are equally thick on
+every side. ASS captions declared only PlayResY 288, so libass assumed a 4:3
+grid (PlayResX 384). Glyphs are aspect-corrected but outlines and shadows are
+not: on 9:16 one outline unit was 6.7 px tall and 2.8 px wide (thick top and
+bottom, thin sides, blocky corners). generate_ass now writes PlayResX for the
+frame's shape (subtitles.play_res_x; 162 for 9:16, from the clip's real size
+where known), Classic SRT burns force the same PlayResX, and horizontal margins
+use that grid. This also matches the editor preview, which already assumed
+equal x/y units. Existing clips keep their burned pixels until their captions
+are applied again. Tests: tests/custom/test_caption_outline.py (renders and
+measures side vs top stroke for ASS and Classic, 9:16 and square).

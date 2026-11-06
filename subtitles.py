@@ -146,6 +146,7 @@ def generate_srt_from_video(video_path, output_path, max_chars=20, max_duration=
     cap.release()
 
     if style == "karaoke":
+        style_opts.setdefault("video_size", _video_size(video_path))
         return generate_ass(transcript, 0, duration, output_path, max_chars, max_duration, **style_opts)
     return generate_srt(transcript, 0, duration, output_path, max_chars, max_duration)
 
@@ -349,6 +350,23 @@ def _dim_hex_color(hex_color, opacity, fallback="FFFFFF"):
     return f"{r:02X}{g:02X}{b:02X}"
 
 
+def play_res_x(video_size=None):
+    """PlayResX that matches the frame's shape for PlayResY 288.
+
+    Left out, libass assumes a 4:3 grid (384 wide). Glyphs are aspect-corrected
+    anyway, but outlines and shadows are not: on a 9:16 frame one outline unit
+    came out 6.7 px tall and only 2.8 px wide, so strokes were thick on top and
+    thin at the sides, with blocky corners. 162 is 9:16, the usual output.
+    """
+    try:
+        width, height = video_size
+        if width > 0 and height > 0:
+            return max(1, round(288 * width / height))
+    except (TypeError, ValueError):
+        pass
+    return 162
+
+
 def custom_margin_v(alignment, position_y):
     """MarginV (PlayResY 288 units) for alignment 'custom', else None.
 
@@ -393,7 +411,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                  margin_v=SAFE_MARGIN_V, split_ranges=None,
                  reveal=False, shadow=0, horizontal_padding=6.17, bold=True, highlight_enabled=True,
                  position_y=None, shadow_angle=45, shadow_blur=0, shadow_color="#000000",
-                 shadow_opacity=0.55):
+                 shadow_opacity=0.55, video_size=None):
     """
     Generates a karaoke-style ASS file: each block is shown like the SRT path,
     but the currently spoken word is rendered in highlight_color (modern
@@ -419,6 +437,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     position_y: with alignment 'custom', the caption's bottom edge as a
     percentage of the frame height above the bottom (see custom_margin_v).
     max_chars=1 puts one word on screen at a time.
+    video_size: (width, height) of the video it will be burned on; sets
+    PlayResX so outlines are even on every side (play_res_x). 9:16 if unknown.
     """
     blocks = _collect_word_blocks(transcript, clip_start, clip_end, max_chars, max_duration)
     if not blocks:
@@ -457,7 +477,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     border_width = _clamp_number(border_width, 0, 10, 2)
     shadow_layer = shadow_layer_tags(shadow, shadow_angle, shadow_blur,
                                      shadow_color, shadow_opacity) if not border_width else None
-    margin_h = round(162 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)
+    res_x = play_res_x(video_size)
+    margin_h = round(res_x * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)
 
     if bg_opacity > 0:
         border_style = 3
@@ -514,6 +535,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
+        f"PlayResX: {res_x}\n"
         "PlayResY: 288\n"
         "WrapStyle: 0\n"
         "ScaledBorderAndShadow: yes\n"
@@ -640,7 +662,7 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
                      font_name="Verdana", font_color="#FFFFFF",
                      border_color="#000000", border_width=2,
                      bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17, bold=True, highlight_enabled=True,
-                     position_y=None):
+                     position_y=None, video_size=None):
     """The -vf string burn_subtitles uses (also fed to hooks.add_hook_to_video)."""
     # Position mapping
     ass_alignment = 2
@@ -682,7 +704,11 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
     if margin_v is None:
         margin_v = SAFE_MARGIN_V
 
+    # SRT converts with libass' default 4:3 grid; force the frame's own width
+    # so outlines are even (play_res_x). Margins use the same width.
+    res_x = play_res_x(video_size)
     style_string = (
+        f"PlayResX={res_x},"
         f"Alignment={ass_alignment},"
         f"Fontname={safe_font_name},"
         f"Fontsize={final_fontsize},"
@@ -693,8 +719,8 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         f"Outline={outline_width},"
         f"Shadow=0,"
         f"MarginV={margin_v},"
-        f"MarginL={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
-        f"MarginR={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
+        f"MarginL={round(res_x * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
+        f"MarginR={round(res_x * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
         f"Bold={int(bool(bold))}"
     )
 
@@ -747,8 +773,9 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     main.mark_delivery), from the same decode. ``make_filter(vw, vh, video=,
     logo=, out=)`` is main.watermark_filter.
     """
+    size = _video_size(video_path)
     vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize, horizontal_padding=horizontal_padding, bold=bold,
-                          position_y=position_y,
+                          position_y=position_y, video_size=size,
                           font_name=font_name, font_color=font_color,
                           border_color=border_color, border_width=border_width,
                           bg_color=bg_color, bg_opacity=bg_opacity)
@@ -756,8 +783,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     tail = ['-c:a', 'copy', *video_encode_args(QUALITY), *METADATA_SCRUB,
             '-movflags', '+faststart']
     outputs = [output_path]
-    size = _video_size(video_path) if mark else None
-    if size:
+    if mark and size:
         logo_path, make_filter, mark_path = mark
         marked = make_filter(size[0], size[1], video="[sm]", logo="[1:v]", out="[m]")
         cmd = [
