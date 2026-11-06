@@ -1286,7 +1286,7 @@ def finalize_clip_passthrough(input_video, final_output_video):
 
 
 def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=None,
-                      plan_only=False, mark=False):
+                      plan_only=False, mark=False, clip=None):
     """Burn the default caption style onto a finished clip.
 
     ``split_ranges``: (start, end) stretches, in clip seconds, rendered with
@@ -1319,7 +1319,12 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
         return None  # silent video: nothing to caption
     try:
         import subtitles as _subs
+        import user_defaults
         style = _subs.AUTO_CAPTION_STYLE
+        # The user's saved default (STYLE-001) replaces the built-in look. It is
+        # recorded on the clip, so later edits keep THIS style even if the
+        # default changes afterwards.
+        custom = user_defaults.caption_style()
         output_dir = os.path.dirname(clip_path)
         stem = os.path.basename(clip_path)
         generation_id = int(time.time())
@@ -1346,13 +1351,25 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
         # (CLIP_WORKERS), so a bare timestamp would collide and let one clip
         # burn another's captions.
         ass_path = os.path.join(
-            output_dir, f"autosubs_{generation_id}_{uuid.uuid4().hex[:8]}.ass")
+            output_dir, f"autosubs_{generation_id}_{uuid.uuid4().hex[:8]}."
+                        f"{'srt' if custom and custom.get('style') != 'karaoke' else 'ass'}")
         out_path = os.path.join(output_dir, f"subtitled_{generation_id}_{stem}")
 
         if split_ranges is None:
             import layout_ranges as _layouts
             split_ranges = _layouts.split_ranges(_layouts.read(clip_path))
-        if not _subs.generate_ass(
+        frame = _subs._video_size(clip_path)
+        if custom:
+            if not _subs.write_caption_file(ass_path, transcript, clip_start, clip_end,
+                                            custom, split_ranges, frame):
+                print("   ℹ️ No words in range — clip ships without captions.")
+                return None
+            if clip is not None:
+                clip['caption_style'] = dict(custom)
+            burn = _subs.filter_kwargs(custom)
+            if plan_only:
+                return _subs.subtitles_filter(ass_path, **burn, video_size=frame), generation_id
+        elif not _subs.generate_ass(
                 transcript, clip_start, clip_end, ass_path,
                 split_ranges=split_ranges,
                 max_chars=style["max_chars"], max_duration=style["max_duration"],
@@ -1361,9 +1378,13 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
                 border_color=style["border_color"], border_width=style["border_width"],
                 highlight_color=style["highlight_color"], effect=style["effect"],
                 base_opacity=style["base_opacity"], uppercase=style["uppercase"],
-                video_size=_subs._video_size(clip_path)):
+                video_size=frame):
             print("   ℹ️ No words in range — clip ships without captions.")
             return None
+        else:
+            burn = dict(alignment=style["alignment"], fontsize=style["font_size"],
+                        font_name=style["font_name"], font_color=style["font_color"],
+                        border_color=style["border_color"], border_width=style["border_width"])
 
         if plan_only:
             vf = _subs.subtitles_filter(
@@ -1377,12 +1398,7 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
             marked = (watermark_logo_path(), watermark_filter,
                       os.path.join(output_dir, watermarked.marked_name(out_path)))
         try:
-            _subs.burn_subtitles(
-                clip_path, ass_path, out_path,
-                alignment=style["alignment"], fontsize=style["font_size"],
-                font_name=style["font_name"], font_color=style["font_color"],
-                border_color=style["border_color"], border_width=style["border_width"],
-                mark=marked)
+            _subs.burn_subtitles(clip_path, ass_path, out_path, **burn, mark=marked)
         except Exception:
             if marked and os.path.exists(marked[2]):
                 os.remove(marked[2])  # never serve a half-written wm_ copy
@@ -1420,11 +1436,19 @@ def auto_hook_clip(clip_path, clip, captions=None, mark=False):
     text = (clip.get('viral_hook_text') or '').strip()
     if not text:
         return None
-    style = os.environ.get("AUTO_HOOK_STYLE", "pill")
+    import user_defaults
+    saved = user_defaults.hook() or {}
+    # The per-job choice from the upload form (AUTO_HOOK_STYLE) wins for the
+    # look; the saved default (STYLE-001) supplies it otherwise, plus the font,
+    # placement, size and duration the form does not offer.
+    style = os.environ.get("AUTO_HOOK_STYLE") or saved.get("style") or "pill"
     try:
-        seconds = float(os.environ.get("AUTO_HOOK_SECONDS", "5"))
-    except ValueError:
+        seconds = float(saved.get("duration_seconds") or os.environ.get("AUTO_HOOK_SECONDS", "5"))
+    except (TypeError, ValueError):
         seconds = 5.0
+    font = saved.get("font")
+    position = saved.get("position") or "auto"
+    font_scale = user_defaults.HOOK_SIZE_SCALE.get(saved.get("size") or "M", 1.0)
     try:
         from hooks import add_hook_to_video, HOOK_STYLES
         if style not in HOOK_STYLES:
@@ -1434,10 +1458,12 @@ def auto_hook_clip(clip_path, clip, captions=None, mark=False):
             output_dir, f"hooked_{int(time.time())}_{os.path.basename(clip_path)}")
         # "auto": off the speaker's face and off the captions (hook_placement);
         # the layout ranges say where the captions sit (the seam on SPLIT).
-        config = {"text": text, "style": style, "position": "auto",
-                  "duration_seconds": seconds}
-        place = {"position": "auto", "layout_ranges": clip.get('layout_ranges'),
-                 "has_captions": bool(captions)}
+        config = {"text": text, "style": style, "position": position,
+                  "duration_seconds": seconds, "font": font, "font_scale": font_scale,
+                  "position_x": saved.get("position_x"), "position_y": saved.get("position_y")}
+        place = {"position": position, "layout_ranges": clip.get('layout_ranges'),
+                 "has_captions": bool(captions), "font": font, "font_scale": font_scale,
+                 "position_x": saved.get("position_x"), "position_y": saved.get("position_y")}
 
         def note(result):
             if isinstance(result, dict) and result.get("y") is not None:
@@ -2843,7 +2869,8 @@ if __name__ == '__main__':
                         plan = None
                         if (clip.get('viral_hook_text') or '').strip():
                             plan = auto_caption_clip(clip_final_path, transcript, start, end,
-                                                     split_ranges=split_ranges, plan_only=True)
+                                                     split_ranges=split_ranges, plan_only=True,
+                                                     clip=clip)
                         hooked = auto_hook_clip(clip_final_path, clip, captions=plan,
                                                 mark=os.environ.get("WATERMARK") == "1")
                         if hooked:
@@ -2854,7 +2881,7 @@ if __name__ == '__main__':
                             captioned = auto_caption_clip(
                                 deliver_path, transcript, start, end,
                                 split_ranges=split_ranges,
-                                mark=os.environ.get("WATERMARK") == "1")
+                                mark=os.environ.get("WATERMARK") == "1", clip=clip)
                         served = captioned or deliver_path
                         if os.environ.get("WATERMARK") == "1":
                             served = mark_delivery(served)
@@ -2915,7 +2942,8 @@ if __name__ == '__main__':
 
             # Persist per-clip render results added by the workers (auto_hook)
             # so the editor can see what is already burned into each clip.
-            if any('auto_hook' in c or 'hook_grounding' in c for c in shorts):
+            if any('auto_hook' in c or 'hook_grounding' in c or 'caption_style' in c
+                   for c in shorts):
                 # Atomic: the dashboard is already reading this file for the
                 # clips announced above (CLIP_READY).
                 write_json_atomic(metadata_file, clips_data, indent=2)

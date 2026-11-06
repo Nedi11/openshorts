@@ -3,6 +3,7 @@ import { Link2, Upload, FileVideo, X, Info, Loader2, ChevronDown } from 'lucide-
 import { track } from '../lib/analytics';
 import { getApiUrl } from '../config';
 import SourceCost from './SourceCost';
+import { fetchDefaults } from '../lib/userDefaults';
 
 const SUPPORTED_PLATFORMS = [
     'YouTube', 'Vimeo', 'TikTok', 'X / Twitter', 'Twitch', 'Kick',
@@ -58,6 +59,14 @@ export default function MediaInput({ onProcess, isProcessing }) {
         // v2 key: the default became 'pill'; an old saved 'classic' was just the old default.
         try { return localStorage.getItem('os_auto_hook_style_v2') || 'pill'; } catch { return 'pill'; }
     });
+    // A saved default hook (Settings, STYLE-001) is where each upload starts;
+    // the picker below still overrides it for this one video.
+    useEffect(() => {
+        let cancelled = false;
+        fetchDefaults().then((d) => { if (!cancelled && d.hook?.style) setAutoHookStyle(d.hook.style); })
+            .catch(() => { /* no saved defaults (or cloud): keep the last-used style */ });
+        return () => { cancelled = true; };
+    }, []);
     // Layout: 'auto' lets the AI pick per video (server default); the others
     // force one on so a podcast host who knows what they uploaded doesn't
     // depend on the detector, and 'none' keeps the plain single crop.

@@ -5,6 +5,8 @@ import MediaInput from './components/MediaInput';
 import McpConnectCard from './components/McpConnectCard';
 import ResultCard from './components/ResultCard';
 import RenderQueue, { RenderQueueSlot } from './components/RenderQueue';
+import { captionFields } from './lib/captionFields';
+import DefaultStylesCard from './components/DefaultStylesCard';
 import ProcessingAnimation from './components/ProcessingAnimation';
 // import Gallery from './components/Gallery';
 import ThumbnailStudio from './components/ThumbnailStudio';
@@ -619,31 +621,7 @@ function App() {
           body: JSON.stringify({
             job_id: jobId,
             clip_index: i,
-            position: options.position,
-            font_size: options.fontSize,
-                    bold: options.bold ?? true,
-                    highlight_enabled: options.highlightEnabled ?? true,
-                    horizontal_padding: options.horizontalPadding ?? 6.17,
-            font_name: options.fontName,
-            font_color: options.fontColor,
-            border_color: options.borderColor,
-            border_width: options.borderWidth,
-            bg_color: options.bgColor,
-            bg_opacity: options.bgOpacity,
-            style: options.style || 'pill',
-            highlight_color: options.highlightColor || '#FFD700',
-            effect: options.effect || 'none',
-            base_opacity: options.baseOpacity ?? 1.0,
-            uppercase: options.uppercase || false,
-            reveal: options.reveal || false,
-            shadow: options.shadow || 0,
-            shadow_angle: options.shadowAngle ?? 45,
-            shadow_blur: options.shadowBlur ?? 0,
-            shadow_color: options.shadowColor || '#000000',
-            shadow_opacity: options.shadowOpacity ?? 0.55,
-            position_y: options.position === 'custom' ? options.positionY : null,
-            max_chars: options.maxChars ?? null,
-            max_duration: options.maxDuration ?? null,
+            ...captionFields(options),
             // Chain from the clip's current server file (its video_url basename).
             input_filename: (clips[i].video_url || '').split('/').pop(),
           }),
@@ -1672,6 +1650,7 @@ function App() {
               </div>
               {/* Self-hosted installs have no account page, so the agent
                   how-to lives here; cloud users get it (with OAuth) in Account. */}
+              {!billingEnabled && <DefaultStylesCard />}
               {!billingEnabled && <div className="mb-6"><McpConnectCard cloud={false} /></div>}
               {isManaged ? (
                 <div className="card p-6 mb-2">

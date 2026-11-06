@@ -82,7 +82,9 @@ def test_no_recorded_style_keeps_the_default_look(tmp_path, monkeypatch):
 
 def test_burn_maps_the_recorded_fields(tmp_path, monkeypatch):
     gen, burn = {}, {}
-    monkeypatch.setattr(app_module, "generate_ass",
+    # Generation lives in subtitles.write_caption_file (shared with the pipeline).
+    import subtitles
+    monkeypatch.setattr(subtitles, "generate_ass",
                         lambda t, s, e, path, **k: gen.update(k) or True)
     monkeypatch.setattr(app_module, "burn_subtitles",
                         lambda v, sub, out, **k: burn.update(k))
@@ -100,9 +102,10 @@ def test_burn_maps_the_recorded_fields(tmp_path, monkeypatch):
 
 def test_classic_style_writes_an_srt(tmp_path, monkeypatch):
     srt = {}
-    monkeypatch.setattr(app_module, "generate_srt",
+    import subtitles
+    monkeypatch.setattr(subtitles, "generate_srt",
                         lambda t, s, e, path, mc, md: srt.update(mc=mc, md=md) or True)
-    monkeypatch.setattr(app_module, "generate_ass",
+    monkeypatch.setattr(subtitles, "generate_ass",
                         lambda *a, **k: pytest.fail("classic is not karaoke"))
     monkeypatch.setattr(app_module, "burn_subtitles", lambda *a, **k: None)
     assert app_module._burn_caption_style(

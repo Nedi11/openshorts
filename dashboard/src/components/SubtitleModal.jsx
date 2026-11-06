@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { captionFields } from '../lib/captionFields';
+import { fetchDefaults, saveDefaults } from '../lib/userDefaults';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
 import { ASS_SCALE, subtitleFontPixels, subtitleOutline, CAPTION_PRESET_Y, customCaptionBottom } from '../lib/subtitleGeometry';
@@ -115,7 +117,7 @@ const swatchClass = (selected) =>
         ? 'ring-2 ring-[color:var(--color-accent)] ring-offset-2 ring-offset-[color:var(--color-paper-2)]'
         : 'ring-1 ring-[color:var(--color-rule-2)] hover:ring-[color:var(--color-accent)]'}`;
 
-export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll, onRemove, isProcessing, videoUrl, jobId, clipIndex, existingHook, bulkCount = 0, bulkProgress }) {
+export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll, onRemove, isProcessing, videoUrl, jobId, clipIndex, existingHook, bulkCount = 0, bulkProgress, defaultsMode = false }) {
     // The defaults cover new clips; saved style and words load when opened.
     const [position, setPosition] = useState('bottom');
     const [fontSize, setFontSize] = useState(44);
@@ -200,9 +202,77 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const [captionLoadError, setCaptionLoadError] = useState('');
     const [useRemotionPreview, setUseRemotionPreview] = useState(false);
 
+    // Load a saved style (/api/subtitle field names) into the controls.
+    const applySaved = (saved) => {
+        setPosition(saved.position || 'bottom');
+        setFontSize(saved.font_size ?? 44);
+        setFontName(saved.font_name || 'Anton');
+        setFontColor(saved.font_color || '#FFFFFF');
+        setBorderColor(saved.border_color || '#000000');
+        setBorderWidth(saved.border_width ?? 4);
+        setBgColor(saved.bg_color || '#000000');
+        setBgOpacity(saved.bg_opacity ?? 0);
+        setStyle(saved.style || 'karaoke');
+        setEffect(saved.effect || 'none');
+        setHighlightColor(saved.highlight_color || '#FFE500');
+        setBaseOpacity(saved.base_opacity ?? 1);
+        setUppercase(saved.uppercase ?? true);
+        setReveal(!!saved.reveal);
+        setShadow(saved.shadow ?? 0);
+        setShadowAngle(saved.shadow_angle ?? 45);
+        setShadowBlur(saved.shadow_blur ?? 0);
+        setShadowColor(saved.shadow_color || '#000000');
+        setShadowOpacity(saved.shadow_opacity ?? 0.55);
+        if (saved.position_y != null) setPositionY(saved.position_y);
+        setBold(saved.bold ?? true);
+        setHighlightEnabled(saved.highlight_enabled ?? true);
+        setHorizontalPadding(saved.horizontal_padding ?? 6.17);
+        setOneWord(saved.max_chars === 1);
+        setSavedLineBudget(saved.max_chars ?? 20);
+        setMaxDuration(saved.max_duration ?? 2.0);
+        setAnimationState(EFFECT_TO_ANIMATION[saved.effect] || 'none');
+        setActivePreset('custom');
+    };
+
+    // Default-style mode (Settings): no clip, so the saved default and sample
+    // words timed like speech drive the preview.
+    const [defaultsStatus, setDefaultsStatus] = useState('');
+    useEffect(() => {
+        if (!isOpen || !defaultsMode) return;
+        let cancelled = false;
+        setDefaultsStatus('');
+        setCaptionsLoading(true);
+        fetchDefaults()
+            .then((d) => { if (!cancelled) applySaved(d.caption_style || d.builtin.caption_style); })
+            .catch((e) => { if (!cancelled) setDefaultsStatus(e.message); })
+            .finally(() => {
+                if (cancelled) return;
+                const words = 'This watch flipped for twelve thousand dollars in one single week'.split(' ');
+                const sample = words.map((text, i) => ({ text, startMs: 300 + i * 420, endMs: 300 + i * 420 + 400 }));
+                setCaptions(sample);
+                setOriginalCaptions(sample);
+                setEditableText(words.join(' '));
+                setDurationSec(6);
+                setUseRemotionPreview(true);
+                setCaptionsLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [isOpen, defaultsMode]);
+
+    const saveAsDefault = async (styleOptions) => {
+        setDefaultsStatus('saving…');
+        try {
+            await saveDefaults({ caption_style: captionFields(styleOptions) });
+            setDefaultsStatus('Saved: new videos get this caption style.');
+            if (defaultsMode) onClose();
+        } catch (e) {
+            setDefaultsStatus(e.message);
+        }
+    };
+
     // Fetch word-level captions when modal opens
     useEffect(() => {
-        if (!isOpen || !jobId || clipIndex === undefined) return;
+        if (!isOpen || defaultsMode || !jobId || clipIndex === undefined) return;
 
         let cancelled = false;
         const controller = new AbortController();
@@ -215,37 +285,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
             })
             .then((data) => {
                 if (cancelled) return;
-                const saved = data?.captionStyle;
-                if (saved) {
-                    setPosition(saved.position || 'bottom');
-                    setFontSize(saved.font_size ?? 44);
-                    setFontName(saved.font_name || 'Anton');
-                    setFontColor(saved.font_color || '#FFFFFF');
-                    setBorderColor(saved.border_color || '#000000');
-                    setBorderWidth(saved.border_width ?? 4);
-                    setBgColor(saved.bg_color || '#000000');
-                    setBgOpacity(saved.bg_opacity ?? 0);
-                    setStyle(saved.style || 'karaoke');
-                    setEffect(saved.effect || 'none');
-                    setHighlightColor(saved.highlight_color || '#FFE500');
-                    setBaseOpacity(saved.base_opacity ?? 1);
-                    setUppercase(saved.uppercase ?? true);
-                    setReveal(!!saved.reveal);
-                    setShadow(saved.shadow ?? 0);
-                    setShadowAngle(saved.shadow_angle ?? 45);
-                    setShadowBlur(saved.shadow_blur ?? 0);
-                    setShadowColor(saved.shadow_color || '#000000');
-                    setShadowOpacity(saved.shadow_opacity ?? 0.55);
-                    if (saved.position_y != null) setPositionY(saved.position_y);
-                    setBold(saved.bold ?? true);
-                    setHighlightEnabled(saved.highlight_enabled ?? true);
-                    setHorizontalPadding(saved.horizontal_padding ?? 6.17);
-                    setOneWord(saved.max_chars === 1);
-                    setSavedLineBudget(saved.max_chars ?? 20);
-                    setMaxDuration(saved.max_duration ?? 2.0);
-                    setAnimationState(EFFECT_TO_ANIMATION[saved.effect] || 'none');
-                    setActivePreset('custom');
-                }
+                if (data?.captionStyle) applySaved(data.captionStyle);
                 if (data && data.captions && data.captions.length > 0) {
                     setCaptions(data.captions);
                     setOriginalCaptions(data.captions);
@@ -259,7 +299,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
             .catch(() => { if (!cancelled) { setUseRemotionPreview(false); setCaptionLoadError('Could not load saved captions. Reopen the caption editor to retry.'); } })
             .finally(() => { if (!cancelled) setCaptionsLoading(false); });
         return () => { cancelled = true; controller.abort(); };
-    }, [isOpen, jobId, clipIndex]);
+    }, [isOpen, defaultsMode, jobId, clipIndex]);
 
     // When user edits text, redistribute words across original timestamps
     const handleTextEdit = (newText) => {
@@ -342,7 +382,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} size="xl" eyebrow="EDITOR · SUBTITLES" title="subtitles">
+        <Modal isOpen={isOpen} onClose={onClose} size="xl" eyebrow={defaultsMode ? 'SETTINGS · DEFAULT CAPTIONS' : 'EDITOR · SUBTITLES'} title={defaultsMode ? 'default captions for new videos' : 'subtitles'}>
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
                 {/* Sticky on desktop: the controls scroll past a preview that stays in view. */}
@@ -675,6 +715,14 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             const bulkRunning = bulkProgress?.running;
                             return (
                                 <>
+                                    {defaultsMode ? (
+                                    <div className="flex gap-2">
+                                        <button onClick={onClose} className="btn-ghost">cancel</button>
+                                        <button onClick={() => saveAsDefault(styleOptions)} disabled={captionsLoading} className="btn-primary flex-1">
+                                            save as default
+                                        </button>
+                                    </div>
+                                    ) : (
                                     <div className="flex gap-2">
                                         <button onClick={onClose} className="btn-ghost">
                                             cancel
@@ -688,7 +736,15 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                             {(isProcessing && !bulkRunning) ? 'generating...' : 'apply to this clip'}
                                         </button>
                                     </div>
-                                    {onApplyAll && bulkCount > 1 && (
+                                    )}
+                                    {defaultsStatus && <p role="status" className="text-xs text-muted">{defaultsStatus}</p>}
+                                    {!defaultsMode && (
+                                        <button type="button" onClick={() => saveAsDefault(styleOptions)}
+                                            className="text-xs text-muted underline underline-offset-2 lowercase hover:text-ink2">
+                                            save these settings as default for new videos
+                                        </button>
+                                    )}
+                                    {!defaultsMode && onApplyAll && bulkCount > 1 && (
                                         <button
                                             onClick={() => onApplyAll({ ...styleOptions, captions: null })}
                                             disabled={isProcessing || captionsLoading || !!captionLoadError}
@@ -702,7 +758,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                     {/* Clips ship captioned by default, so the way
                                         out has to be here — otherwise a user who
                                         doesn't want captions is stuck with them. */}
-                                    {onRemove && (
+                                    {!defaultsMode && onRemove && (
                                         <button
                                             onClick={onRemove}
                                             disabled={isProcessing || captionsLoading || !!captionLoadError}
