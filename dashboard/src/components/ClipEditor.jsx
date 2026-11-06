@@ -7,7 +7,7 @@ import {
 import { getApiUrl, withParam } from '../config';
 import { apiFetch, apiJson, QuotaError, openQuotaWall } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { censorSections, adjust, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEPS } from '../lib/censorSections';
+import { censorSections, setSkip, moveEdge, resetWord, parseWords, PAD_BEFORE, PAD_AFTER, STEPS } from '../lib/censorSections';
 
 // Full-screen clip editor: shows WHICH source segments a clip was cut from,
 // lets the user trim/extend/split/reorder them (word-snapped), and re-renders
@@ -1549,10 +1549,10 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                 </label>
                                 <p className="text-xs text-muted">Exact words, ignoring case and punctuation. Add variants or words in your language. Uses transcript timing; review the rendered result.</p>
                                 <p className="text-xs text-muted">Bleep replaces caption text with [bleep]. Cut shortens the video and removes those caption words. Applied when you render.</p>
-                                <label className="block readout">Start earlier by {censorPadBefore.toFixed(2)}s
+                                <label className="block readout">Default: start earlier by {censorPadBefore.toFixed(2)}s
                                     <input aria-label="Censor lead" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="0.5" step="0.01" value={censorPadBefore} onChange={e => setCensorPadBefore(Number(e.target.value))} />
                                 </label>
-                                <label className="block readout">End later by {censorPadAfter.toFixed(2)}s
+                                <label className="block readout">Default: end later by {censorPadAfter.toFixed(2)}s
                                     <input aria-label="Censor tail" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="0.5" step="0.01" value={censorPadAfter} onChange={e => setCensorPadAfter(Number(e.target.value))} />
                                 </label>
                                 <div>
@@ -1571,14 +1571,19 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                                         </span>
                                                         <span className="flex items-center gap-1">
                                                             {sourceAvailable && <button type="button" className="btn-ghost !px-1.5 !py-0.5" onClick={() => playSection(c)} title="Play this section on the source monitor">play</button>}
-                                                            <label className="flex items-center gap-1 text-muted"><input type="checkbox" checked={!c.skip} onChange={e => setCensorAdjustments((a) => adjust(a, c.key, 'skip', !e.target.checked))} aria-label={`Censor ${c.word} at ${fmtClock(c.clipStart)}`} />on</label>
+                                                            <label className="flex items-center gap-1 text-muted"><input type="checkbox" checked={!c.skip} onChange={e => setCensorAdjustments((a) => setSkip(a, c.key, !e.target.checked))} aria-label={`Censor ${c.word} at ${fmtClock(c.clipStart)}`} />on</label>
                                                         </span>
                                                     </div>
                                                     {!c.skip && (
                                                         <div className="mt-1 space-y-1 text-muted">
                                                             <p>
                                                                 removes <span className="font-mono text-ink2">{c.crossed ? '—' : `${fmtClock(c.clipStart)} – ${fmtClock(c.clipEnd)}`}</span>
-                                                                {(c.before || c.after) ? (
+                                                                {(c.manualStart || c.manualEnd) && (
+                                                                    <span className="ml-1" title="Hand-set edges keep their time when the start-earlier / end-later presets change">
+                                                                        ({c.manualStart && c.manualEnd ? 'both edges' : c.manualStart ? 'start' : 'end'} set by hand)
+                                                                    </span>
+                                                                )}
+                                                                {(c.manualStart || c.manualEnd) ? (
                                                                     <button type="button" className="underline underline-offset-2 ml-2 hover:text-ink" onClick={() => setCensorAdjustments((a) => resetWord(a, c.key))}>reset</button>
                                                                 ) : null}
                                                             </p>
@@ -1610,6 +1615,7 @@ export default function ClipEditor({ jobId, clipIndex, clipTitle, onClose, onRer
                                         ))}
                                     </div>
                                     <p className="text-[11px] text-muted mt-1">◀ earlier · ▶ later, one step per click. Start/End move one edge, Move shifts the whole section. Sections can be as short as 0.01s. Times are on the edited clip.</p>
+                                    <p className="text-[11px] text-muted">Start earlier / End later only place edges you haven't moved. Once you move an edge it keeps its time; reset hands it back to them.</p>
                                 </div>
                             </>}
                         </div>

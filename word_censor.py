@@ -1,10 +1,13 @@
 """Word-timed opt-in censorship. Matching is exact, case/punctuation insensitive.
 
-Each matched word becomes a SECTION of source time: the word's transcript
-timing widened by ``pad_before`` / ``pad_after`` (Whisper tends to start a word
-slightly after its sound does, so the default lead is the larger), then by the
-user's per-word nudges (``adjustments``, keyed by ``occurrence_key``), which
-can also skip a word. The editor shows the same sections (ClipEditor.jsx
+Each matched word becomes a SECTION of source time. ``pad_before`` /
+``pad_after`` only PRESET it: the word's transcript timing widened by them
+(Whisper tends to start a word slightly after its sound does, so the default
+lead is the larger). An edge the user set by hand (``adjustments``, keyed by
+``occurrence_key``) is an absolute source time (``start`` / ``end``) that the
+presets no longer move; the other edge keeps following its preset. A word can
+also be skipped. Settings saved before that stored relative ``before`` /
+``after`` offsets on top of the presets; those are still read. The editor shows the same sections (ClipEditor.jsx
 censorSections mirrors ``sections``) and the render uses exactly those.
 """
 import copy
@@ -48,6 +51,29 @@ def _number(value, lo, hi, default):
     return max(lo, min(hi, value))
 
 
+def _clean_adjustment(adj):
+    """One word's adjustment: absolute ``start``/``end`` (source seconds) for
+    hand-set edges, legacy relative ``before``/``after``, and ``skip``. Empty
+    dict when nothing is set."""
+    entry = {}
+    for field in ('start', 'end'):
+        if adj.get(field) is not None:
+            try:
+                value = float(adj[field])
+            except (TypeError, ValueError):
+                raise ValueError('Word section times must be numbers of seconds')
+            if not 0 <= value <= 360000:
+                raise ValueError('Word section times must be within the video')
+            entry[field] = round(value, 3)
+    for field in ('before', 'after'):
+        value = round(_number(adj.get(field), -MAX_NUDGE, MAX_NUDGE, 0.0), 3)
+        if value and field.replace('before', 'start').replace('after', 'end') not in entry:
+            entry[field] = value
+    if adj.get('skip'):
+        entry['skip'] = True
+    return entry
+
+
 def normalize_settings(mode, words, pad_before=PAD_BEFORE, pad_after=PAD_AFTER, adjustments=None):
     """Validated settings dict (raises ValueError on bad input)."""
     if mode not in ('off', 'bleep', 'cut'):
@@ -62,11 +88,8 @@ def normalize_settings(mode, words, pad_before=PAD_BEFORE, pad_after=PAD_AFTER, 
             key = f"{float(key):.3f}"
         except (TypeError, ValueError):
             raise ValueError('Word adjustments are keyed by the word start time')
-        adj = adj or {}
-        entry = {'before': round(_number(adj.get('before'), -MAX_NUDGE, MAX_NUDGE, 0.0), 3),
-                 'after': round(_number(adj.get('after'), -MAX_NUDGE, MAX_NUDGE, 0.0), 3),
-                 'skip': bool(adj.get('skip'))}
-        if entry['before'] or entry['after'] or entry['skip']:
+        entry = _clean_adjustment(adj or {})
+        if entry:
             clean[key] = entry
     return {'mode': mode, 'words': list(words),
             'pad_before': round(_number(pad_before, 0, MAX_PAD, PAD_BEFORE), 3),
@@ -78,7 +101,7 @@ def sections(transcript, settings, segments):
     """Source-time sections to censor inside ``segments``, in time order.
 
     [{'key', 'word', 's', 'e', 'start', 'end'}]: s/e are the transcript timing,
-    start/end the padded and nudged section, clamped to the segment holding
+    start/end the section (hand-set edges as given, others preset), clamped to the segment holding
     the word. Skipped words and words outside every segment are left out.
     """
     if not settings or settings.get('mode') not in ('bleep', 'cut'):
@@ -95,8 +118,11 @@ def sections(transcript, settings, segments):
         home = next((s for s in segments if s['start'] < word['e'] and word['s'] < s['end']), None)
         if home is None:
             continue
-        start = word['s'] - pad_before - _number(adj.get('before'), -MAX_NUDGE, MAX_NUDGE, 0)
-        end = word['e'] + pad_after + _number(adj.get('after'), -MAX_NUDGE, MAX_NUDGE, 0)
+        # A hand-set edge is absolute; otherwise the preset (plus a legacy offset).
+        start = (float(adj['start']) if adj.get('start') is not None else
+                 word['s'] - pad_before - _number(adj.get('before'), -MAX_NUDGE, MAX_NUDGE, 0))
+        end = (float(adj['end']) if adj.get('end') is not None else
+               word['e'] + pad_after + _number(adj.get('after'), -MAX_NUDGE, MAX_NUDGE, 0))
         if end - start < MIN_SECTION:
             # Nudges that cross the edges must not quietly leave the word in.
             raise ValueError(

@@ -437,15 +437,16 @@ def test_rerender_applies_music_removal_then_adjusted_bleeps(job, fake_recut, mo
     response = _request('POST', '/api/clip/rerender', {
         'job_id': JOB_ID, 'clip_index': 0, 'segments': [{'start': 10, 'end': 40}],
         'censor_mode': 'bleep', 'censor_words': ['world'], 'censor_pad_before': 0.3,
-        'censor_adjustments': {'20': {'after': 0.25}},
+        'censor_adjustments': {'20': {'end': 20.65}},
         'music_mode': 'reduce', 'music_reduce_db': 12})
     assert response.status_code == 200, response.text
-    # Music first, so the tone is never separated away; the bleep uses the
-    # padded and nudged section on the clip timeline (word 20.0-20.4 s).
-    assert calls == [('music', 'reduce', 12.0), ('bleep', [[9.7, 10.7]])]
+    # Music first, so the tone is never separated away. The bleep runs from
+    # the 0.3 s preset lead to the hand-set end (word 20.0-20.4 s, end 20.65 s),
+    # on the clip timeline that starts at 10 s.
+    assert calls == [('music', 'reduce', 12.0), ('bleep', [[9.7, 10.65]])]
     saved = json.loads(job['meta_path'].read_text())['shorts'][0]
     assert saved['music_removal'] == {'mode': 'reduce', 'reduce_db': 12.0}
-    assert saved['censorship']['adjustments'] == {'20.000': {'before': 0.0, 'after': 0.25, 'skip': False}}
+    assert saved['censorship']['adjustments'] == {'20.000': {'end': 20.65}}
     edl = _request('GET', f'/api/clip/{JOB_ID}/0/edl').json()
     assert edl['music_removal']['mode'] == 'reduce' and edl['censorship']['pad_before'] == 0.3
     bad = _request('POST', '/api/clip/rerender', {'job_id': JOB_ID, 'clip_index': 0,
