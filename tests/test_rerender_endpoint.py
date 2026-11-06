@@ -421,13 +421,13 @@ def test_rerender_keeps_hook_and_cuts_selected_words(job, fake_recut, monkeypatc
     assert saved['censorship']['mode']=='cut'
     assert saved['recipe']['segments']==[{'start':10.0,'end':19.85},{'start':20.45,'end':40.0}]
     assert saved['censorship']['sections'][0]['key']=='20.000'
-    assert saved['music_removal']=={'mode':'off','reduce_db':18.0}
+    assert saved['music_removal']=={'mode':'off','reduce_db':18.0,'quality':'fast'}
 
 
 def test_rerender_applies_music_removal_then_adjusted_bleeps(job, fake_recut, monkeypatch):
     calls = []
     monkeypatch.setattr(app_module.music_removal, 'process',
-                        lambda path, mode, db: calls.append(('music', mode, db)))
+                        lambda path, mode, db, quality: calls.append(('music', mode, db, quality)))
     monkeypatch.setattr(app_module.word_censor, 'bleep',
                         lambda path, sections: calls.append(('bleep', sections)))
     def perform(**kw):
@@ -438,14 +438,14 @@ def test_rerender_applies_music_removal_then_adjusted_bleeps(job, fake_recut, mo
         'job_id': JOB_ID, 'clip_index': 0, 'segments': [{'start': 10, 'end': 40}],
         'censor_mode': 'bleep', 'censor_words': ['world'], 'censor_pad_before': 0.3,
         'censor_adjustments': {'20': {'end': 20.65}},
-        'music_mode': 'reduce', 'music_reduce_db': 12})
+        'music_mode': 'reduce', 'music_reduce_db': 12, 'music_quality': 'hq'})
     assert response.status_code == 200, response.text
     # Music first, so the tone is never separated away. The bleep runs from
     # the 0.3 s preset lead to the hand-set end (word 20.0-20.4 s, end 20.65 s),
     # on the clip timeline that starts at 10 s.
-    assert calls == [('music', 'reduce', 12.0), ('bleep', [[9.7, 10.65]])]
+    assert calls == [('music', 'reduce', 12.0, 'hq'), ('bleep', [[9.7, 10.65]])]
     saved = json.loads(job['meta_path'].read_text())['shorts'][0]
-    assert saved['music_removal'] == {'mode': 'reduce', 'reduce_db': 12.0}
+    assert saved['music_removal'] == {'mode': 'reduce', 'reduce_db': 12.0, 'quality': 'hq'}
     assert saved['censorship']['adjustments'] == {'20.000': {'end': 20.65}}
     edl = _request('GET', f'/api/clip/{JOB_ID}/0/edl').json()
     assert edl['music_removal']['mode'] == 'reduce' and edl['censorship']['pad_before'] == 0.3
