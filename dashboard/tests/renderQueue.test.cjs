@@ -29,7 +29,7 @@ before(async () => {
   const outfile = path.join(bundleDirectory, 'component.cjs');
   await build({
     entryPoints: [path.join(__dirname, '../src/components/RenderQueue.jsx')],
-    outfile, bundle: true, platform: 'node', format: 'cjs', external: ['react'],
+    outfile, bundle: true, platform: 'node', format: 'cjs', external: ['react', 'react-dom'],
     plugins: [{ name: 'queue-test-adapters', setup(builder) {
       builder.onLoad({ filter: /\/lib\/api\.js$/ }, () => ({ contents:
         'export const apiFetch = (...args) => globalThis.queueTestFetch(...args);' }));
@@ -42,7 +42,7 @@ before(async () => {
   const cardfile = path.join(bundleDirectory, 'card.cjs');
   await build({
     entryPoints: [path.join(__dirname, '../src/components/ResultCard.jsx')],
-    outfile: cardfile, bundle: true, platform: 'node', format: 'cjs', external: ['react'],
+    outfile: cardfile, bundle: true, platform: 'node', format: 'cjs', external: ['react', 'react-dom'],
     plugins: [{ name: 'card-test-adapters', setup(builder) {
       builder.onLoad({ filter: /\/lib\/api\.js$/ }, () => ({ contents:
         'export const apiFetch = (...args) => globalThis.queueTestFetch(...args);' }));
