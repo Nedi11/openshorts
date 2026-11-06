@@ -3,6 +3,9 @@ transnetv2-pytorch==1.0.5
 ultralytics==8.4.46
 torch==2.11.0
 torchvision==0.26.0
+torchaudio==2.11.0
+# Music removal (music_removal.py); torchaudio above comes from the CPU index.
+demucs==4.0.1
 tqdm==4.67.3
 yt-dlp
 faster-whisper==1.2.1
