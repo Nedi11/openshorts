@@ -9,7 +9,7 @@ export interface CaptionWord {
 
 // --- Subtitle config ---
 export type SubtitleAnimation = "none" | "word-highlight" | "pop" | "karaoke";
-export type SubtitlePosition = "top" | "middle" | "bottom";
+export type SubtitlePosition = "top" | "middle" | "bottom" | "custom";
 
 export interface SubtitleStyle {
   bold?: boolean;
@@ -29,6 +29,12 @@ export interface SubtitleStyle {
   reveal?: boolean;
   // Drop shadow depth in burn units (subtitles.generate_ass `shadow`).
   shadow?: number;
+  // Shadow direction in degrees (0 right, 90 down), softness in burn \\blur
+  // units, colour and opacity (subtitles.shadow_layer_tags).
+  shadowAngle?: number;
+  shadowBlur?: number;
+  shadowColor?: string;
+  shadowOpacity?: number;
   // Text colour on the active-word box ("karaoke" animation).
   highlightTextColor?: string;
 }
@@ -36,6 +42,8 @@ export interface SubtitleStyle {
 export interface SubtitleConfig {
   captions: CaptionWord[];
   position: SubtitlePosition;
+  // position "custom": caption bottom edge, % of the height above the bottom.
+  positionY?: number;
   style: SubtitleStyle;
   // Line budget, mirrors the burn's max_chars / max_duration.
   horizontalPadding?: number;
@@ -46,7 +54,7 @@ export interface SubtitleConfig {
 // --- Hook config ---
 // "auto": the server picks a spot off the faces and the captions (hook_placement.py);
 // the browser preview and render, which cannot see faces, draw it at the top.
-export type HookPosition = "auto" | "top" | "center" | "bottom";
+export type HookPosition = "auto" | "top" | "center" | "bottom" | "custom";
 export type HookSize = "S" | "M" | "L";
 export type HookEntrance = "spring" | "fade" | "slide-up" | "none";
 export type HookStyle =
@@ -67,6 +75,9 @@ export interface HookConfig {
   style?: HookStyle;
   /** montserrat | anton | serif; unset = the style's own typeface. */
   font?: HookFont;
+  /** position "custom": 0-100 % of the free travel across / down (hooks.custom_overlay_xy). */
+  positionX?: number;
+  positionY?: number;
   entranceAnimation: HookEntrance;
   displayDurationSec: number;
 }
@@ -120,13 +131,13 @@ export const subtitleStyleSchema = z.object({
 
 export const subtitleConfigSchema = z.object({
   captions: z.array(captionWordSchema),
-  position: z.enum(["top", "middle", "bottom"]),
+  position: z.enum(["top", "middle", "bottom", "custom"]),
   style: subtitleStyleSchema,
 });
 
 export const hookConfigSchema = z.object({
   text: z.string(),
-  position: z.enum(["auto", "top", "center", "bottom"]),
+  position: z.enum(["auto", "top", "center", "bottom", "custom"]),
   size: z.enum(["S", "M", "L"]),
   style: z
     .enum(["pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow"])

@@ -67,6 +67,47 @@ export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
   );
 };
 
+// Lays the hook out like hooks.py: a preset row (top / center / bottom), or
+// for "custom" flex spacers that share the free space x : 100 - x across and
+// y : 100 - y down (hooks.custom_overlay_xy), so the box never leaves frame.
+const Placement: React.FC<{
+  config: HookConfig;
+  positionStyle: React.CSSProperties;
+  children: React.ReactNode;
+}> = ({ config, positionStyle, children }) => {
+  if (config.position !== "custom") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          display: "flex",
+          justifyContent: "center",
+          ...positionStyle,
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  const pct = (v: number | undefined, d: number) =>
+    Math.min(100, Math.max(0, Number.isFinite(v) ? (v as number) : d));
+  const x = pct(config.positionX, 50);
+  const y = pct(config.positionY, 22);
+  return (
+    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flexGrow: y, flexBasis: 0 }} />
+      <div style={{ display: "flex", flexShrink: 0 }}>
+        <div style={{ flexGrow: x, flexBasis: 0 }} />
+        <div style={{ flexShrink: 0, maxWidth: "90%", display: "flex" }}>{children}</div>
+        <div style={{ flexGrow: 100 - x, flexBasis: 0 }} />
+      </div>
+      <div style={{ flexGrow: 100 - y, flexBasis: 0 }} />
+    </div>
+  );
+};
+
 interface HookBoxProps {
   config: HookConfig;
   displayFrames: number;
@@ -126,6 +167,8 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
 
   const positionStyle = POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
   const look = HOOK_LOOKS[config.style ?? "pill"] ?? HOOK_LOOKS.pill;
+  // Custom placement already caps its wrapper at 90% of the width.
+  const boxMaxWidth = config.position === "custom" ? "100%" : "90%";
 
   // Typeface and size as hooks.py: the chosen font, else the style's own;
   // font size = factor x the 90%-of-width box.
@@ -137,21 +180,12 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
     // box-decoration-break: clone gives every wrapped line its own padded,
     // rounded box, the same stack hooks.py draws for the FFmpeg path.
     return (
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          display: "flex",
-          justifyContent: "center",
-          ...positionStyle,
-        }}
-      >
+      <Placement config={config} positionStyle={positionStyle}>
         <div
           style={{
             opacity: animOpacity,
             transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
-            maxWidth: "90%",
+            maxWidth: boxMaxWidth,
             textAlign: "center",
             lineHeight: 1.62,
           }}
@@ -173,26 +207,17 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
             {config.text}
           </span>
         </div>
-      </div>
+      </Placement>
     );
   }
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        display: "flex",
-        justifyContent: "center",
-        ...positionStyle,
-      }}
-    >
+    <Placement config={config} positionStyle={positionStyle}>
       <div
         style={{
           opacity: animOpacity,
           transform: `scale(${animScale}) translateY(${animTranslateY}px)`,
-          maxWidth: "90%",
+          maxWidth: boxMaxWidth,
           backgroundColor: look.box ?? "transparent",
           borderRadius: 20,
           padding: look.box ? `${25 * scale}px ${30 * scale}px` : 0,
@@ -219,6 +244,6 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
           {config.text}
         </span>
       </div>
-    </div>
+    </Placement>
   );
 };

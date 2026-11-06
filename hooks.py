@@ -481,15 +481,36 @@ def _auto_place(video_path, text, target_box_width, hook_filename, font_scale, s
             "y": round(y, 3), "scale": rel}
 
 
+def custom_overlay_xy(position_x, position_y, video_width, video_height, box_w, box_h):
+    """Top-left pixel of a hook box placed by percentages of its free travel.
+
+    0 puts the box against the left/top edge, 100 against the right/bottom
+    edge, 50 centres it, so the whole box is always in frame. The preview lays
+    it out the same way (HookOverlay.tsx CustomPlacement: flex spacers that
+    share the free space x : 100 - x).
+    """
+    def pct(value, default):
+        try:
+            return max(0.0, min(100.0, float(value)))
+        except (TypeError, ValueError):
+            return default
+    free_x = max(0, video_width - box_w)
+    free_y = max(0, video_height - box_h)
+    return (round(free_x * pct(position_x, 50.0) / 100),
+            round(free_y * pct(position_y, 22.0) / 100))
+
+
 def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="pill",
                       also=None, font=None, layout_ranges=None, has_captions=True,
-                      mark=None):
+                      mark=None, position_x=None, position_y=None):
     """
     Overlays text hook onto video.
     position: 'top', 'center', 'bottom', or 'auto' (hook_placement: off the
       faces in the hook's window and off the caption bands; what the job
       pipeline and an editor left on "auto" use). An explicit top/center/
-      bottom is drawn exactly where it always was.
+      bottom is drawn exactly where it always was. 'custom' places the box by
+      ``position_x`` / ``position_y``: 0-100 % of its free travel across and
+      down the frame (custom_overlay_xy), so it always stays in frame.
     layout_ranges / has_captions: only read by 'auto', to know where the
       captions sit (seam on SPLIT stretches, bottom elsewhere). None reads
       the clip's own ``.layout.json`` sidecar.
@@ -551,6 +572,9 @@ def add_hook_to_video(video_path, text, output_path, position="top", font_scale=
         
         if placed:
             overlay_y = placed["y_px"]
+        elif position == "custom":
+            overlay_x, overlay_y = custom_overlay_xy(
+                position_x, position_y, video_width, video_height, box_w, box_h)
         elif position == "center":
             overlay_y = (video_height - box_h) // 2
         elif position == "bottom":

@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import RemotionPreview from './RemotionPreview';
 import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
+import { HOOK_PRESET_Y } from '../lib/subtitleGeometry';
 
 const ENTRANCE_OPTIONS = [
     { value: 'spring', label: 'Bounce' },
@@ -43,6 +44,7 @@ const POSITION_OPTIONS = [
     { value: 'top', label: 'top' },
     { value: 'center', label: 'center' },
     { value: 'bottom', label: 'bottom' },
+    { value: 'custom', label: 'custom' },
 ];
 
 const SIZE_OPTIONS = [
@@ -63,6 +65,16 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     // Stored as `pos`, not `position`: before 'auto' existed every save wrote
     // 'top' whether or not the user ever touched the control.
     const [position, setPosition] = useState(prefs.pos || 'auto');
+    // custom: 0-100 % of the box's free travel across / down (hooks.custom_overlay_xy).
+    const [positionX, setPositionX] = useState(prefs.px ?? 50);
+    const [positionY, setPositionY] = useState(prefs.py ?? 22);
+    const choosePosition = (value) => {
+        if (value === 'custom' && position !== 'custom') {
+            setPositionX(50);
+            setPositionY(HOOK_PRESET_Y[position] ?? 22);
+        }
+        setPosition(value);
+    };
     const [size, setSize] = useState(prefs.size || 'M');
     const [style, setStyle] = useState(prefs.style || 'pill');
     // null = follow the style's own typeface.
@@ -77,6 +89,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     const hookConfig = {
         text: text || 'Enter your text...',
         position,
+        positionX,
+        positionY,
         size,
         style,
         font: effectiveFont,
@@ -91,6 +105,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
         switch (position) {
             case 'center': return 'items-center justify-center';
             case 'bottom': return 'items-center justify-end pb-[20%]';
+            case 'custom': return 'items-center justify-start';
             case 'top': default: return 'items-center justify-start pt-[20%]';
         }
     };
@@ -111,7 +126,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
             <style>{pillFontFace}</style>
             <div className="flex flex-col md:flex-row gap-6">
                 {/* Left: Preview */}
-                <div className="w-full max-w-[300px] mx-auto md:mx-0 md:w-[300px] shrink-0 self-start flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16]">
+                <div className="w-full max-w-[300px] mx-auto md:mx-0 md:w-[300px] shrink-0 self-start md:sticky md:top-0 z-10 flex flex-col items-center justify-center bg-black rounded-card border border-rule overflow-hidden relative aspect-[9/16]">
                     {useRemotionPreview ? (
                         <RemotionPreview
                             videoUrl={videoUrl}
@@ -122,7 +137,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                     ) : (
                         <>
                             <video src={videoUrl} className="w-full h-full object-contain opacity-50" muted playsInline />
-                            <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col h-full ${getPositionClass()}`}>
+                            <div className={`absolute w-full px-8 text-center transition-all duration-300 pointer-events-none flex flex-col h-full ${getPositionClass()}`}
+                                style={position === 'custom' ? { paddingTop: `${positionY * 16 / 9}%`, transform: `translateX(${positionX - 50}%)` } : undefined}>
                                 <div
                                     className="text-black font-bold px-3 py-2 rounded-xl shadow-2xl text-center whitespace-pre-wrap transition-all duration-200"
                                     style={{
@@ -145,7 +161,7 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
 
                 {/* Right: Controls */}
                 <div className="w-full md:w-80 flex flex-col">
-                    <div className="space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-5 flex-1 pr-1">
                         {/* Text Input */}
                         <div>
                             <p className="eyebrow mb-2">Text</p>
@@ -216,9 +232,20 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             <SegmentedControl
                                 options={POSITION_OPTIONS}
                                 value={position}
-                                onChange={setPosition}
+                                onChange={choosePosition}
                                 size="sm"
                             />
+                            {position === 'custom' && (
+                                <div className="mt-2 space-y-2">
+                                    <label className="block readout">Up / down: {positionY}% <span className="text-muted">(0 top · 100 bottom)</span>
+                                        <input aria-label="Hook vertical position" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="100" step="0.5" value={positionY} onChange={e => setPositionY(Number(e.target.value))} />
+                                    </label>
+                                    <label className="block readout">Left / right: {positionX}% <span className="text-muted">(0 left · 100 right)</span>
+                                        <input aria-label="Hook horizontal position" className="w-full accent-[var(--color-accent)]" type="range" min="0" max="100" step="0.5" value={positionX} onChange={e => setPositionX(Number(e.target.value))} />
+                                    </label>
+                                    <p className="text-[11px] text-muted leading-relaxed">The hook is kept fully inside the frame.</p>
+                                </div>
+                            )}
                             {position === 'auto' && (
                                 <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
                                     Placed where it covers no face and no captions.
@@ -309,11 +336,11 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                             onClick={() => {
                                 try {
                                     localStorage.setItem('os_hook_prefs', JSON.stringify({
-                                        style, font, pos: position, size, entranceAnimation,
+                                        style, font, pos: position, px: positionX, py: positionY, size, entranceAnimation,
                                     }));
                                 } catch { /* ignore */ }
                                 onGenerate({
-                                    text, position, size, style, font: effectiveFont,
+                                    text, position, positionX, positionY, size, style, font: effectiveFont,
                                     // Remotion data
                                     remotion: hookConfig,
                                 });

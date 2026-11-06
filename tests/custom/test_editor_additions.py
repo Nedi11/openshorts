@@ -83,7 +83,8 @@ def test_native_caption_has_no_outline_and_existing_presets_remain(tmp_path):
     values = next(line for line in lines if line.startswith('Style: Default')).removeprefix('Style: ').split(',')
     style = dict(zip(names, values))
     assert style['Fontname'] == 'Arial'
-    assert style['Outline'] == '0' and style['Shadow'] == '1'
+    assert style['Outline'] == '0' and style['Shadow'] == '0'
+    assert any(line.startswith('Dialogue: 0,') and '\\xshad1\\yshad1' in line for line in lines)
 
 
 @pytest.mark.parametrize('source,width,height', [('320x180',1080,1920), ('90x320',1080,1920), ('320x180',1080,1080)])
@@ -111,6 +112,7 @@ def test_caption_padding_small_size_and_stroke_without_shadow(tmp_path):
     style = next(line for line in path.read_text().splitlines() if line.startswith('Style: Default')).split(',')
     assert style[2] == '6'
     assert style[17] == '0'  # no separate shadow behind an outlined glyph
+    assert 'xshad' not in path.read_text()
     assert style[19:21] == ['32', '32']
     classic = subtitles_filter('caption.srt', horizontal_padding=20, fontsize=8)
     assert 'MarginL=77,MarginR=77' in classic

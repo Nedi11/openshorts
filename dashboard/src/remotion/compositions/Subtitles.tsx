@@ -7,7 +7,7 @@ import {
   spring,
   interpolate,
 } from "remotion";
-import { subtitleOutline } from "../../lib/subtitleGeometry";
+import { subtitleOutline, subtitleShadowCss, customCaptionBottom } from "../../lib/subtitleGeometry";
 import type { SubtitleConfig } from "../lib/types";
 import { groupCaptionsIntoBlocks, getActiveWordIndex } from "../lib/captions";
 import { getFontStack, antonFontFace, montserratFontFace, liberationFontFaces } from "../lib/fonts";
@@ -83,7 +83,9 @@ const SubtitleBlock: React.FC<SubtitleBlockProps> = ({
   const currentTimeMs = blockStartMs + (frame / fps) * 1000;
   const activeIndex = getActiveWordIndex(block.words, currentTimeMs);
 
-  const positionStyle = POSITION_MAP[position] ?? POSITION_MAP.bottom;
+  const positionStyle = position === "custom"
+    ? { bottom: `${customCaptionBottom(config.positionY)}%`, top: "auto" }
+    : POSITION_MAP[position] ?? POSITION_MAP.bottom;
   const fontStack = getFontStack(style.fontFamily);
 
   // Background box style
@@ -232,9 +234,7 @@ const WordSpan: React.FC<WordSpanProps> = ({
   }
 
   // A real continuous outline; offset glyph shadows split into copies at large widths.
-  const dropShadow = style.shadow && !style.borderWidth
-    ? `${style.shadow * (1920 / 288)}px ${style.shadow * (1920 / 288)}px 0px rgba(0,0,0,0.55)`
-    : "";
+  const dropShadow = !style.borderWidth ? subtitleShadowCss(style) : "";
 
   return (
     <span

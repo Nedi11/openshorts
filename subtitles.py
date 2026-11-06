@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import subprocess
@@ -348,6 +349,41 @@ def _dim_hex_color(hex_color, opacity, fallback="FFFFFF"):
     return f"{r:02X}{g:02X}{b:02X}"
 
 
+def custom_margin_v(alignment, position_y):
+    """MarginV (PlayResY 288 units) for alignment 'custom', else None.
+
+    ``position_y`` is the caption's bottom edge as a percentage of the frame
+    height above the bottom edge (0-90). Bottom anchoring keeps the preview, the
+    ASS burn and the classic SRT burn on the same reference line.
+    """
+    if str(alignment).lower() != 'custom':
+        return None
+    pct = _clamp_number(position_y, 0, 90, SAFE_MARGIN_V / 288 * 100)
+    return round(288 * pct / 100)
+
+
+def shadow_layer_tags(shadow, angle=45, blur=0, color="#000000", opacity=0.55):
+    """Override tags for the shadow-only layer, or None when there is no shadow.
+
+    The fill is nearly transparent (alpha FE): libass skips the shadow of a fully
+    transparent fill, but still draws it for an almost invisible one. Distance
+    is ``shadow`` units along each axis at 45 degrees (the old equal-offset look),
+    i.e. ``shadow * sqrt(2)`` along ``angle``.
+    """
+    depth = _clamp_number(shadow, 0, 10, 0)
+    blur = _clamp_number(blur, 0, 10, 0)
+    if depth <= 0 and blur <= 0:
+        return None
+    rad = math.radians(_clamp_number(angle, -360, 360, 45))
+    dx = round(depth * math.sqrt(2) * math.cos(rad), 2)
+    dy = round(depth * math.sqrt(2) * math.sin(rad), 2)
+    opacity = _clamp_number(opacity, 0.0, 1.0, 0.55)
+    colour = _hex_to_ass_inline_color(color, fallback="000000")
+    alpha = f"&H{round((1 - opacity) * 255):02X}&"
+    return (f"\\1a&HFE&\\bord0\\shad0\\xshad{dx:g}\\yshad{dy:g}"
+            f"\\4c{colour}\\4a{alpha}\\blur{blur:g}")
+
+
 def generate_ass(transcript, clip_start, clip_end, output_path,
                  max_chars=20, max_duration=2.0, alignment='bottom',
                  fontsize=16, font_name="Verdana", font_color="#FFFFFF",
@@ -355,7 +391,9 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                  highlight_color="#FFD700", bg_color="#000000", bg_opacity=0.0,
                  effect="none", base_opacity=1.0, uppercase=False,
                  margin_v=SAFE_MARGIN_V, split_ranges=None,
-                 reveal=False, shadow=0, horizontal_padding=6.17, bold=True, highlight_enabled=True):
+                 reveal=False, shadow=0, horizontal_padding=6.17, bold=True, highlight_enabled=True,
+                 position_y=None, shadow_angle=45, shadow_blur=0, shadow_color="#000000",
+                 shadow_opacity=0.55):
     """
     Generates a karaoke-style ASS file: each block is shown like the SRT path,
     but the currently spoken word is rendered in highlight_color (modern
@@ -373,6 +411,13 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     the line never reflows while it fills.
     shadow: drop shadow depth in PlayRes units (0 = none). With border_width
     0 it is the soft "clean" look; a hard outline does not need it.
+    shadow_angle / shadow_blur / shadow_color / shadow_opacity: direction in
+    degrees (0 = right, 90 = down; 45 keeps the old equal x/y offset of
+    ``shadow`` units), softness (libass \\blur) and look of that shadow. It is
+    drawn on its own layer under the text, so blurring it never softens the
+    letters themselves. A blur with zero depth gives a centred soft halo.
+    position_y: with alignment 'custom', the caption's bottom edge as a
+    percentage of the frame height above the bottom (see custom_margin_v).
     max_chars=1 puts one word on screen at a time.
     """
     blocks = _collect_word_blocks(transcript, clip_start, clip_end, max_chars, max_duration)
@@ -384,6 +429,9 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
 
     align_map = {'top': 8, 'middle': 5, 'bottom': 2}
     ass_alignment = align_map.get(str(alignment).lower(), 2)
+    custom_v = custom_margin_v(alignment, position_y)
+    if custom_v is not None:
+        margin_v = custom_v
 
     # On a SPLIT scene the two speakers are stacked and the seam between the
     # halves (exactly mid-frame) is the one place the text covers nobody, so
@@ -407,7 +455,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     primary_colour = hex_to_ass_color(_dim_hex_color(font_color, base_opacity), 1.0)
     bg_opacity = _clamp_number(bg_opacity, 0.0, 1.0, 0.0)
     border_width = _clamp_number(border_width, 0, 10, 2)
-    shadow = int(_clamp_number(shadow, 0, 6, 0)) if not border_width else 0
+    shadow_layer = shadow_layer_tags(shadow, shadow_angle, shadow_blur,
+                                     shadow_color, shadow_opacity) if not border_width else None
     margin_h = round(162 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)
 
     if bg_opacity > 0:
@@ -420,7 +469,9 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         # Honor the slider's explicit zero, with or without a shadow.
         outline_width = int(border_width)
 
-    back_colour = hex_to_ass_color("#000000", 0.55 if shadow else 0.0)
+    # The style itself never casts a shadow; shadow_layer draws it instead.
+    shadow = 0
+    back_colour = hex_to_ass_color("#000000", 0.0)
     highlight_inline = _hex_to_ass_inline_color(highlight_color, fallback="FFD700")
 
     # Inline override tags for the active word; {\r} after it resets to the
@@ -492,19 +543,32 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                 continue
 
             parts = []
+            shadow_parts = []
             for j, other in enumerate(block):
                 text = _escape_ass_text(other['word'])
                 if uppercase:
                     text = text.upper()
                 if j == i:
                     parts.append(f"{active_prefix}{text}{{\\r}}")
+                    # Same glyph geometry as the text layer, so the shadow
+                    # follows the pop scale of the active word.
+                    grow = (f"{{\\fscx90\\fscy90\\t(0,110,\\fscx108\\fscy108)}}"
+                            if effect == "pop" else "")
+                    shadow_parts.append(f"{grow}{text}{{\\r{shadow_layer}}}" if grow else text)
                 elif reveal and j > i:
                     parts.append(f"{{\\alpha&HFF&}}{text}{{\\r}}")
+                    shadow_parts.append(f"{{\\alpha&HFF&}}{text}{{\\r{shadow_layer}}}")
                 else:
                     parts.append(text)
+                    shadow_parts.append(text)
 
+            if shadow_layer:
+                events.append(
+                    f"Dialogue: 0,{_ass_time(ev_start)},{_ass_time(ev_end)},Default,,0,0,0,,"
+                    f"{seam_prefix(ev_start)}{{{shadow_layer}}}{' '.join(shadow_parts)}"
+                )
             events.append(
-                f"Dialogue: 0,{_ass_time(ev_start)},{_ass_time(ev_end)},Default,,0,0,0,,"
+                f"Dialogue: 1,{_ass_time(ev_start)},{_ass_time(ev_end)},Default,,0,0,0,,"
                 f"{seam_prefix(ev_start)}{' '.join(parts)}"
             )
 
@@ -575,7 +639,8 @@ def _sanitize_font_name(name):
 def subtitles_filter(srt_path, alignment=2, fontsize=16,
                      font_name="Verdana", font_color="#FFFFFF",
                      border_color="#000000", border_width=2,
-                     bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17, bold=True, highlight_enabled=True):
+                     bg_color="#000000", bg_opacity=0.0, horizontal_padding=6.17, bold=True, highlight_enabled=True,
+                     position_y=None):
     """The -vf string burn_subtitles uses (also fed to hooks.add_hook_to_video)."""
     # Position mapping
     ass_alignment = 2
@@ -613,6 +678,9 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         outline_width = int(border_width)
 
     back_colour = hex_to_ass_color("#000000", 0.0)
+    margin_v = custom_margin_v(alignment, position_y)
+    if margin_v is None:
+        margin_v = SAFE_MARGIN_V
 
     style_string = (
         f"Alignment={ass_alignment},"
@@ -624,7 +692,7 @@ def subtitles_filter(srt_path, alignment=2, fontsize=16,
         f"BorderStyle={border_style},"
         f"Outline={outline_width},"
         f"Shadow=0,"
-        f"MarginV={SAFE_MARGIN_V},"
+        f"MarginV={margin_v},"
         f"MarginL={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
         f"MarginR={round(384 * _clamp_number(horizontal_padding, 0, 35, 6.17) / 100)},"
         f"Bold={int(bool(bold))}"
@@ -666,7 +734,8 @@ def _video_size(path):
 def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
                    font_name="Verdana", font_color="#FFFFFF",
                    border_color="#000000", border_width=2,
-                   bg_color="#000000", bg_opacity=0.0, mark=None, horizontal_padding=6.17, bold=True, highlight_enabled=True):
+                   bg_color="#000000", bg_opacity=0.0, mark=None, horizontal_padding=6.17, bold=True, highlight_enabled=True,
+                   position_y=None):
     """
     Burns subtitles into the video using FFmpeg.
     Supports two modes:
@@ -679,6 +748,7 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
     logo=, out=)`` is main.watermark_filter.
     """
     vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize, horizontal_padding=horizontal_padding, bold=bold,
+                          position_y=position_y,
                           font_name=font_name, font_color=font_color,
                           border_color=border_color, border_width=border_width,
                           bg_color=bg_color, bg_opacity=bg_opacity)
